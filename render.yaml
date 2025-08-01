@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: leakstuff
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_ENV
+        value: production
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+    routes:
+      - type: response
+        source: /_vercel/**
+        status: 404
+        headers:
+          Content-Type: text/plain
+        content: 'Not Found'
+      - type: redirect
+        source: /admin
+        destination: /
+      - type: redirect
+        source: /login
+        destination: /
+      - type: redirect
+        source: /videos
+        destination: /
+      - type: redirect
+        source: /video/:path*
+        destination: /
+      - type: rewrite
+        source: /*
+        destination: /index.html
+        status: 200 

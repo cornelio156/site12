@@ -1,0 +1,21 @@
+{
+  "rewrites": [
+    { "source": "/admin", "destination": "/" },
+    { "source": "/login", "destination": "/" },
+    { "source": "/videos", "destination": "/" },
+    { "source": "/video/:id", "destination": "/" },
+    { "source": "/(.*)", "destination": "/" }
+  ],
+  "functions": {
+    "api/create-checkout-session.js": {
+      "memory": 1024,
+      "maxDuration": 10
+    }
+  },
+  "env": {
+    "APPWRITE_ENDPOINT": "https://fra.cloud.appwrite.io/v1",
+    "APPWRITE_PROJECT_ID": "686ff4a2001595970536",
+    "APPWRITE_DATABASE_ID": "681f818100229727cfc0",
+    "APPWRITE_SITE_CONFIG_COLLECTION_ID": "681f8ff2002d7e996c1"
+  }
+}
