@@ -1,4 +1,4 @@
-import { databases, databaseId, sessionCollectionId } from './node_appwrite';
+import { databases, databaseId, sessionCollectionId, account } from './node_appwrite';
 import { ID, Query } from 'appwrite';
 
 // Session interface
@@ -22,9 +22,27 @@ export class SessionManager {
   private static LOG_THROTTLE = 5000; // Only log cache hits every 5 seconds
   private static validationCount = 0;
   
+  // Ensure there is an Appwrite session (anonymous) so Role.users() permissions apply
+  private static async ensureAnonymousAuth(): Promise<void> {
+    try {
+      // If there's a current session, this will succeed
+      await account.get();
+    } catch {
+      try {
+        await account.createAnonymousSession();
+      } catch (authError) {
+        console.error('Erro ao criar sessão anônima do Appwrite:', authError);
+        throw authError;
+      }
+    }
+  }
+
   // Create a new session for a user
   static async createSession(userId: string): Promise<Session | null> {
     try {
+      // Garantir sessão Appwrite (anônima) para poder escrever com Role.users()
+      await this.ensureAnonymousAuth();
+
       // Generate a unique session token
       const token = this.generateSessionToken();
       
@@ -32,28 +50,28 @@ export class SessionManager {
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + 24);
       
-      // Session data - simplificado para evitar problemas
-      const sessionData = {
-        userId,
+      // Session data em snake_case para corresponder ao schema do Appwrite
+      // Enviar somente atributos obrigatórios para evitar erros de schema desconhecido
+      const sessionData: Record<string, unknown> = {
+        user_id: userId,
         token,
-        createdAt: new Date().toISOString(),
-        expiresAt: expiresAt.toISOString(),
-        isActive: true
+        expires_at: expiresAt.toISOString(),
       };
       
       // Tente adicionar userAgent se possível
       try {
-        if (navigator && navigator.userAgent) {
+        if (navigator && (navigator as any).userAgent) {
           // Limitar o tamanho para evitar problemas
-          const userAgent = navigator.userAgent.substring(0, 255);
-          Object.assign(sessionData, { userAgent });
+          const userAgent = (navigator as any).userAgent.substring(0, 255);
+          // Adicionar opcionalmente se o schema suportar; não é obrigatório
+          Object.assign(sessionData, { user_agent: userAgent });
         }
       } catch (e) {
         console.log('Não foi possível adicionar userAgent, continuando sem ele');
       }
       
       // Create session in database
-      const session = await databases.createDocument(
+      const createdDoc = await databases.createDocument(
         databaseId,
         sessionCollectionId,
         ID.unique(),
@@ -63,13 +81,21 @@ export class SessionManager {
       // Store session token in local storage
       localStorage.setItem('sessionToken', token);
       
-      // Update cache with the new session
-      this.sessionCache[token] = { 
-        session: session as unknown as Session, 
-        timestamp: Date.now() 
+      // Mapear documento criado para interface Session
+      const mapped: Session = {
+        $id: (createdDoc as any).$id,
+        userId: (createdDoc as any).user_id,
+        token: (createdDoc as any).token,
+        userAgent: (createdDoc as any).user_agent,
+        createdAt: (createdDoc as any).created_at,
+        expiresAt: (createdDoc as any).expires_at,
+        isActive: (createdDoc as any).is_active,
       };
+
+      // Update cache with the new session
+      this.sessionCache[token] = { session: mapped, timestamp: Date.now() };
       
-      return session as unknown as Session;
+      return mapped;
     } catch (error) {
       console.error('Error creating session:', error);
       return null;
@@ -79,6 +105,9 @@ export class SessionManager {
   // Validate a session
   static async validateSession(token: string): Promise<Session | null> {
     try {
+      // Garantir sessão Appwrite (anônima) para leituras se necessário
+      await this.ensureAnonymousAuth();
+
       // Check if we already have a validation in progress for this token
       if (this.validationInProgress[token]) {
         // Silent return from cache without logging
@@ -122,7 +151,16 @@ export class SessionManager {
         return null;
       }
       
-      const session = response.documents[0] as unknown as Session;
+      const doc: any = response.documents[0];
+      const session: Session = {
+        $id: doc.$id,
+        userId: doc.user_id,
+        token: doc.token,
+        userAgent: doc.user_agent,
+        createdAt: doc.created_at,
+        expiresAt: doc.expires_at,
+        isActive: doc.is_active,
+      };
       console.log('Sessão encontrada:', session.$id, 'para usuário:', session.userId);
       
       // Verificar se a sessão está ativa
@@ -164,6 +202,9 @@ export class SessionManager {
   // Deactivate a session
   static async deactivateSession(sessionId: string): Promise<void> {
     try {
+      // Garantir sessão Appwrite (anônima) para poder atualizar com Role.users()
+      await this.ensureAnonymousAuth();
+
       await databases.updateDocument(
         databaseId,
         sessionCollectionId,
@@ -184,6 +225,9 @@ export class SessionManager {
   // Deactivate all sessions for a user
   static async deactivateAllUserSessions(userId: string): Promise<void> {
     try {
+      // Garantir sessão Appwrite (anônima)
+      await this.ensureAnonymousAuth();
+
       // Find all active sessions for user
       const response = await databases.listDocuments(
         databaseId,

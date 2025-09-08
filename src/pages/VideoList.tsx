@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import type { FC } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Container from '@mui/material/Container';
 import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
-import Pagination from '@mui/material/Pagination';
+import { Fade, Grow } from '@mui/material';
 import TextField from '@mui/material/TextField';
 import InputAdornment from '@mui/material/InputAdornment';
 import SearchIcon from '@mui/icons-material/Search';
@@ -23,16 +24,16 @@ import Button from '@mui/material/Button';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import Collapse from '@mui/material/Collapse';
 import Slider from '@mui/material/Slider';
-import Chip from '@mui/material/Chip';
+import { Chip } from '@mui/material';
+import Modal from '@mui/material/Modal';
+import Backdrop from '@mui/material/Backdrop';
+import WarningIcon from '@mui/icons-material/Warning';
 import { useAuth } from '../services/Auth';
 import VideoCard from '../components/VideoCard';
 import { VideoService, Video, SortOption } from '../services/VideoService';
 import { useSiteConfig } from '../context/SiteConfigContext';
 import { useDebounce } from '../hooks/useDebounce';
-import Modal from '@mui/material/Modal';
-import Fade from '@mui/material/Fade';
-import Backdrop from '@mui/material/Backdrop';
-import WarningIcon from '@mui/icons-material/Warning';
+import ContactSection from '../components/ContactSection';
 
 // Skeleton card component for loading state
 const VideoCardSkeleton: FC = () => {
@@ -64,13 +65,12 @@ const VideoCardSkeleton: FC = () => {
 };
 
 const VideoList: FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const [sortOption, setSortOption] = useState<SortOption>(SortOption.NEWEST);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const debouncedSearchQuery = useDebounce(searchQuery, 500);
   const [showFilters, setShowFilters] = useState(false);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 100]);
@@ -79,7 +79,6 @@ const VideoList: FC = () => {
   
   const { user } = useAuth();
   const { siteConfig } = useSiteConfig();
-  const videosPerPage = 12;
 
   // Check if user has seen the adult content warning
   useEffect(() => {
@@ -89,23 +88,27 @@ const VideoList: FC = () => {
     }
   }, []);
 
+  // Update search query when URL params change
+  useEffect(() => {
+    const urlSearchQuery = searchParams.get('search') || '';
+    if (urlSearchQuery !== searchQuery) {
+      setSearchQuery(urlSearchQuery);
+    }
+  }, [searchParams]);
+
   useEffect(() => {
     const fetchVideos = async () => {
       try {
         setLoading(true);
         setError(null);
         
-        const { videos: videoList, totalPages: pages } = await VideoService.getVideosWithPagination(
-          page,
-          videosPerPage,
-          sortOption,
-          debouncedSearchQuery
-        );
+        // Get all videos at once without pagination
+        const allVideos = await VideoService.getAllVideos(sortOption, debouncedSearchQuery);
         
-        console.log('Received videos:', videoList);
+        console.log('Received videos:', allVideos);
         
         // Apply client-side filtering for price range
-        let filteredVideos = videoList.filter(video => 
+        let filteredVideos = allVideos.filter(video => 
           video.price >= priceRange[0] && video.price <= priceRange[1]
         );
         
@@ -131,12 +134,8 @@ const VideoList: FC = () => {
           });
         }
         
-        // Set the filtered videos to state
+        // Set all filtered videos to state
         setVideos(filteredVideos);
-        
-        // Calculate total pages based on filtered results
-        const filteredTotalPages = Math.ceil(filteredVideos.length / videosPerPage);
-        setTotalPages(filteredTotalPages > 0 ? filteredTotalPages : 1);
       } catch (err) {
         console.error('Error fetching videos:', err);
         setError('Failed to load videos. Please try again later.');
@@ -146,38 +145,27 @@ const VideoList: FC = () => {
     };
     
     fetchVideos();
-  }, [user, page, sortOption, debouncedSearchQuery, priceRange, durationFilter]);
-
-  const handlePageChange = (event: React.ChangeEvent<unknown>, value: number) => {
-    setPage(value);
-    // Scroll to top when page changes
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, [user, sortOption, debouncedSearchQuery, priceRange, durationFilter]);
 
   const handleSortChange = (event: SelectChangeEvent) => {
     setSortOption(event.target.value as SortOption);
-    setPage(1); // Reset to first page when sort changes
   };
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
-    setPage(1); // Reset to first page when search changes
   };
   
   const handlePriceRangeChange = (event: Event, newValue: number | number[]) => {
     setPriceRange(newValue as [number, number]);
-    setPage(1); // Reset to first page when filter changes
   };
   
   const handleDurationFilterChange = (value: string | null) => {
     setDurationFilter(value === durationFilter ? null : value);
-    setPage(1); // Reset to first page when filter changes
   };
   
   const handleClearFilters = () => {
     setPriceRange([0, 100]);
     setDurationFilter(null);
-    setPage(1);
   };
 
   // Handle adult content warning acknowledgment
@@ -188,7 +176,7 @@ const VideoList: FC = () => {
 
   // Render skeleton loaders during loading state
   const renderSkeletons = () => {
-    return Array(videosPerPage).fill(0).map((_, index) => (
+    return Array(12).fill(0).map((_, index) => (
       <Grid item key={`skeleton-${index}`} xs={12} sm={6} md={4} lg={3}>
         <VideoCardSkeleton />
       </Grid>
@@ -196,6 +184,7 @@ const VideoList: FC = () => {
   };
 
   return (
+    <>
     <Container maxWidth="lg" sx={{ py: 4 }}>
       {/* Adult Content Warning Modal */}
       <Modal
@@ -253,16 +242,59 @@ const VideoList: FC = () => {
         </Fade>
       </Modal>
       
-      <Box sx={{ 
-        display: 'flex', 
-        flexDirection: { xs: 'column', md: 'row' }, 
-        justifyContent: 'space-between',
-        alignItems: { xs: 'stretch', md: 'center' },
-        mb: 3
-      }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          {siteConfig?.video_list_title || 'Available Videos'}
-        </Typography>
+      <Box 
+        data-testid="search-section"
+        sx={{ 
+          display: 'flex', 
+          flexDirection: { xs: 'column', md: 'row' }, 
+          justifyContent: 'space-between',
+          alignItems: { xs: 'stretch', md: 'center' },
+          mb: 3
+        }}>
+        <Box>
+          <Typography variant="h4" component="h1" gutterBottom>
+            {siteConfig?.video_list_title || 'Available Videos'}
+          </Typography>
+          {!loading && videos.length > 0 && (
+            <Box sx={{ mt: -1 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Showing {videos.length} video{videos.length !== 1 ? 's' : ''}
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                <Chip 
+                  label={`From $${Math.min(...videos.map(v => v.price)).toFixed(2)}`}
+                  size="small"
+                  sx={{ 
+                    backgroundColor: 'rgba(255, 15, 80, 0.1)',
+                    color: '#FF0F50',
+                    fontWeight: 'bold',
+                    border: '1px solid rgba(255, 15, 80, 0.3)'
+                  }}
+                />
+                <Chip 
+                  label={`Up to $${Math.max(...videos.map(v => v.price)).toFixed(2)}`}
+                  size="small"
+                  sx={{ 
+                    backgroundColor: 'rgba(255, 15, 80, 0.1)',
+                    color: '#FF0F50',
+                    fontWeight: 'bold',
+                    border: '1px solid rgba(255, 15, 80, 0.3)'
+                  }}
+                />
+                <Chip 
+                  label={`Avg: $${(videos.reduce((sum, v) => sum + v.price, 0) / videos.length).toFixed(2)}`}
+                  size="small"
+                  sx={{ 
+                    backgroundColor: 'rgba(255, 15, 80, 0.1)',
+                    color: '#FF0F50',
+                    fontWeight: 'bold',
+                    border: '1px solid rgba(255, 15, 80, 0.3)'
+                  }}
+                />
+              </Box>
+            </Box>
+          )}
+        </Box>
         
         <Box sx={{ 
           display: 'flex', 
@@ -390,56 +422,56 @@ const VideoList: FC = () => {
         </Alert>
       )}
       
-      {loading ? (
-        <Grid container spacing={3}>
-          {renderSkeletons()}
-        </Grid>
-      ) : videos.length === 0 ? (
-        <Paper sx={{ p: 4, my: 3, textAlign: 'center' }}>
-          <Typography variant="h6" gutterBottom>
-            No videos found
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {searchQuery 
-              ? `No videos matching "${searchQuery}". Try a different search term.` 
-              : (showFilters 
-                ? 'No videos match your current filters. Try adjusting your filter settings.' 
-                : 'No videos available at the moment. Please check back later.')}
-          </Typography>
-        </Paper>
-      ) : (
-        <>
-          <Grid container spacing={3}>
-            {videos.map((video) => (
-              <Grid item key={video.$id} xs={12} sm={6} md={4} lg={3}>
-                <VideoCard video={video} />
+      <Fade in={!loading} timeout={500}>
+        <Box>
+          {loading ? (
+            <Grid container spacing={3}>
+              {renderSkeletons()}
+            </Grid>
+          ) : videos.length === 0 ? (
+            <Grow in={true} timeout={1000}>
+              <Paper sx={{ 
+                p: 4, 
+                my: 3, 
+                textAlign: 'center',
+                borderRadius: 2,
+                background: 'linear-gradient(135deg, rgba(255, 15, 80, 0.05) 0%, rgba(209, 13, 66, 0.05) 100%)'
+              }}>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                  No videos found
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {searchQuery 
+                    ? `No videos matching "${searchQuery}". Try a different search term.` 
+                    : (showFilters 
+                      ? 'No videos match your current filters. Try adjusting your filter settings.' 
+                      : 'No videos available at the moment. Please check back later.')}
+                </Typography>
+              </Paper>
+            </Grow>
+          ) : (
+            <>
+              <Grid container spacing={3}>
+                {videos.map((video, index) => (
+                  <Grow
+                    key={video.$id}
+                    in={true}
+                    timeout={300 + index * 50}
+                  >
+                    <Grid item xs={12} sm={6} md={4} lg={3}>
+                      <VideoCard video={video} />
+                    </Grid>
+                  </Grow>
+                ))}
               </Grid>
-            ))}
-          </Grid>
-          
-          {totalPages > 1 && (
-            <Box sx={{ 
-              display: 'flex', 
-              justifyContent: 'center', 
-              mt: 5,
-              pt: 3,
-              borderTop: '1px solid',
-              borderColor: 'divider'
-            }}>
-              <Pagination 
-                count={totalPages} 
-                page={page} 
-                onChange={handlePageChange}
-                color="primary"
-                size="large"
-                showFirstButton
-                showLastButton
-              />
-            </Box>
+            </>
           )}
-        </>
-      )}
+        </Box>
+      </Fade>
     </Container>
+    
+    <ContactSection />
+    </>
   );
 };
 

@@ -17,12 +17,17 @@ import Container from '@mui/material/Container';
 import Typography from '@mui/material/Typography';
 import { useEffect, useState } from 'react';
 import SplashAnimation from './components/SplashAnimation';
+import PaymentNotifications from './components/PaymentNotifications';
+import PrivacyNotice from './components/PrivacyNotice';
+import ScrollToTop from './components/ScrollToTop';
+import CustomAnalytics from './components/CustomAnalytics';
 
 // Componente AppContent para usar hooks que dependem do Router
 const AppContent: FC = () => {
   const { siteName } = useSiteConfig();
   const [showSplash, setShowSplash] = useState(false);
   const location = useLocation();
+  const enableSplash = false; // feature-flag: disable splash without removing code
   
   // Atualizar o título da página quando o siteName mudar
   useEffect(() => {
@@ -33,6 +38,7 @@ const AppContent: FC = () => {
 
   // Verificar se estamos na rota inicial e configurar a exibição da animação
   useEffect(() => {
+    if (!enableSplash) return;
     // Verificar se é a primeira visita à página inicial
     const isFirstVisit = !sessionStorage.getItem('visited');
     
@@ -63,7 +69,7 @@ const AppContent: FC = () => {
         sessionStorage.removeItem('currentSession');
       }
     };
-  }, [location.pathname]);
+  }, [location.pathname, enableSplash]);
 
   // Função para marcar que a animação foi concluída
   const handleAnimationComplete = () => {
@@ -76,9 +82,13 @@ const AppContent: FC = () => {
       flexDirection: 'column',
       minHeight: '100vh',
     }}>
-      {showSplash && <SplashAnimation onAnimationComplete={handleAnimationComplete} />}
+      {enableSplash && showSplash && <SplashAnimation onAnimationComplete={handleAnimationComplete} />}
+      <PrivacyNotice />
+      <PaymentNotifications />
+      <CustomAnalytics />
       <Header />
       <Box component="main" sx={{ flexGrow: 1 }}>
+        <ScrollToTop />
         <Routes>
           {/* Home page shows our new Home component */}
           <Route path="/" element={<Home />} />

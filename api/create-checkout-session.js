@@ -3,6 +3,15 @@ import Stripe from 'stripe';
 import { Client, Databases } from 'node-appwrite';
 
 export default async function handler(req, res) {
+  // Add CORS headers for Vercel
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -11,20 +20,29 @@ export default async function handler(req, res) {
     // First, get the Stripe secret key from Appwrite
     let stripeSecretKey = '';
     
-    // Initialize Appwrite client without API key
+    // Use Vercel environment variables (sem VITE_ prefix para serverless)
+    const projectId = process.env.APPWRITE_PROJECT_ID;
+    const apiKey = process.env.APPWRITE_API_KEY;
+    
+    if (!projectId || !apiKey) {
+      console.error('Missing Appwrite credentials:', { projectId: !!projectId, apiKey: !!apiKey });
+      return res.status(500).json({ 
+        error: 'Appwrite credentials not configured in Vercel environment variables' 
+      });
+    }
+    
     const client = new Client()
-      .setEndpoint(process.env.APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1')
-      .setProject(process.env.APPWRITE_PROJECT_ID);
-      
-    // API key é opcional e será omitida aqui
+      .setEndpoint('https://fra.cloud.appwrite.io/v1') // Endpoint fixo
+      .setProject(projectId)
+      .setKey(apiKey);
       
     const databases = new Databases(client);
     
     try {
       // Get site config from Appwrite
       const response = await databases.listDocuments(
-        process.env.APPWRITE_DATABASE_ID,
-        process.env.APPWRITE_SITE_CONFIG_COLLECTION_ID
+        'video_site_db', // Database ID fixo
+        'site_config'  // Site Config Collection ID fixo
       );
       
       if (response.documents.length > 0) {
@@ -43,6 +61,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Stripe secret key not found in Appwrite configuration' });
     }
     
+    console.log('Stripe secret key found, initializing Stripe...');
     const stripe = new Stripe(stripeSecretKey);
     const { amount, currency = 'usd', name, success_url, cancel_url } = req.body;
     
@@ -71,51 +90,23 @@ export default async function handler(req, res) {
     // Select a random product name
     const randomProductName = productNames[Math.floor(Math.random() * productNames.length)];
     
-    // Get available payment methods for this account
-    let paymentMethodTypes = [];
+    // Define métodos de pagamento seguros baseados na moeda
+    let paymentMethodTypes = ['card']; // Card é universal
     
-    try {
-      // Get payment method information
-      const paymentMethodsResponse = await stripe.paymentMethods.list({
-        limit: 100,
-      });
-      
-      // Get available payment method types
-      const availableTypes = new Set();
-      paymentMethodsResponse.data.forEach(method => {
-        availableTypes.add(method.type);
-      });
-      
-      // Add all available types
-      paymentMethodTypes = Array.from(availableTypes);
-      
-      // If empty, fall back to card
-      if (paymentMethodTypes.length === 0) {
-        paymentMethodTypes.push('card');
-      }
-      
-      // Alternative approach: get all Stripe capabilities for this account
-      const account = await stripe.accounts.retrieve();
-      console.log('Account capabilities:', account.capabilities);
-      
-      // Add payment methods based on account capabilities
-      if (account.capabilities) {
-        if (account.capabilities.card_payments === 'active' && !paymentMethodTypes.includes('card')) {
-          paymentMethodTypes.push('card');
-        }
-        if (account.capabilities.transfers === 'active' && !paymentMethodTypes.includes('sepa_debit')) {
+    // Adicionar métodos específicos por região/moeda apenas se suportados
+    if (currency.toLowerCase() === 'eur') {
+      // Para EUR, podemos tentar adicionar SEPA (mas apenas se a conta suportar)
+      try {
+        const account = await stripe.accounts.retrieve();
+        if (account.capabilities && account.capabilities.sepa_debit_payments === 'active') {
           paymentMethodTypes.push('sepa_debit');
         }
-        // Add more payment methods based on account capabilities
+      } catch (accountError) {
+        console.warn('Error checking account capabilities:', accountError.message);
       }
-      
-    } catch (paymentMethodsError) {
-      console.warn('Error getting payment methods:', paymentMethodsError);
-      // Fall back to card only
-      paymentMethodTypes = ['card'];
     }
     
-    console.log('Available payment methods:', paymentMethodTypes);
+    console.log(`Payment methods for ${currency.toUpperCase()}:`, paymentMethodTypes);
     
     // Create checkout session
     const session = await stripe.checkout.sessions.create({

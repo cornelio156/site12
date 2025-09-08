@@ -4,7 +4,7 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardMedia from '@mui/material/CardMedia';
 import Typography from '@mui/material/Typography';
-import Chip from '@mui/material/Chip';
+import { Chip } from '@mui/material';
 import Box from '@mui/material/Box';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
@@ -241,20 +241,30 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
           />
         )}
         
-        {/* Price badge */}
+        {/* Price badge - Enhanced visibility */}
         <Chip 
           label={`$${video.price.toFixed(2)}`} 
           color="primary" 
-          size="small" 
+          size="medium" 
           sx={{ 
             position: 'absolute', 
             top: 8, 
             right: 8, 
             fontWeight: 'bold',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+            fontSize: '0.9rem',
+            height: '32px',
+            boxShadow: '0 4px 12px rgba(255, 15, 80, 0.4)',
             backgroundColor: '#FF0F50',
+            border: '2px solid rgba(255, 255, 255, 0.3)',
             '& .MuiChip-label': {
-              color: 'white'
+              color: 'white',
+              fontWeight: 'bold',
+              px: 1.5
+            },
+            '&:hover': {
+              backgroundColor: '#D10D42',
+              transform: 'scale(1.05)',
+              transition: 'all 0.2s ease'
             }
           }}
         />
@@ -277,7 +287,7 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
           {video.title}
         </Typography>
         
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: theme => theme.palette.mode === 'dark' ? '#FF69B4' : 'text.secondary' }}>
             <VisibilityIcon sx={{ fontSize: 16 }} />
             <Typography variant="caption">
@@ -290,6 +300,30 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
               {formatDate(createdAtField)}
             </Typography>
           )}
+        </Box>
+
+        {/* Price display at bottom */}
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center',
+          mt: 1,
+          p: 1,
+          backgroundColor: 'rgba(255, 15, 80, 0.1)',
+          borderRadius: 1,
+          border: '1px solid rgba(255, 15, 80, 0.2)'
+        }}>
+          <Typography 
+            variant="h6" 
+            sx={{ 
+              color: '#FF0F50',
+              fontWeight: 'bold',
+              fontSize: '1.1rem',
+              textAlign: 'center'
+            }}
+          >
+            ${video.price.toFixed(2)}
+          </Typography>
         </Box>
       </CardContent>
     </Card>

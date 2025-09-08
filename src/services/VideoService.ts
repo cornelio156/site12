@@ -29,6 +29,24 @@ export enum SortOption {
 }
 
 export class VideoService {
+  // Cache para vídeos para melhorar performance
+  private static videosCache: Video[] | null = null;
+  private static cacheTimestamp: number = 0;
+  private static readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+
+  // Método para limpar o cache
+  private static clearCache(): void {
+    this.videosCache = null;
+    this.cacheTimestamp = 0;
+  }
+
+  // Verificar se o cache é válido
+  private static isCacheValid(): boolean {
+    return this.videosCache !== null && 
+           this.cacheTimestamp > 0 && 
+           (Date.now() - this.cacheTimestamp) < this.CACHE_DURATION;
+  }
+
   // Método para normalizar os objetos de vídeo
   private static normalizeVideo(video: any): Video {
     // Converter duration (inteiro em segundos) para formato string (MM:SS ou HH:MM:SS)
@@ -69,6 +87,12 @@ export class VideoService {
   // Get all videos with sorting options
   static async getAllVideos(sortOption: SortOption = SortOption.NEWEST, searchQuery: string = ''): Promise<Video[]> {
     try {
+      // Se não há busca e o cache é válido, usar cache
+      if (!searchQuery && this.isCacheValid()) {
+        console.log('Usando cache de vídeos');
+        return this.sortVideos([...this.videosCache!], sortOption);
+      }
+
       console.log('Buscando todos os vídeos da coleção com paginação');
       
       // Array para armazenar todos os vídeos
@@ -77,7 +101,7 @@ export class VideoService {
       // No Appwrite, usamos Query para paginação
       let currentPage = 1;
       let hasMorePages = true;
-      const limit = 100; // Aumentar o tamanho da página para reduzir o número de chamadas
+      const limit = 200; // Aumentar ainda mais o tamanho da página para melhor performance
       
       while (hasMorePages) {
         console.log(`Buscando página ${currentPage} de vídeos (limit: ${limit})`);
@@ -118,6 +142,13 @@ export class VideoService {
           video.description.toLowerCase().includes(trimmedQuery)
         );
       }
+
+      // Atualizar cache se não há busca
+      if (!searchQuery) {
+        this.videosCache = [...videos];
+        this.cacheTimestamp = Date.now();
+        console.log('Cache atualizado com', videos.length, 'vídeos');
+      }
       
       // Obter URLs de miniaturas para cada vídeo
       for (const video of videos) {
@@ -142,44 +173,44 @@ export class VideoService {
         }
       }
       
-      // Ordenar vídeos com base na opção
-      switch (sortOption) {
-        case SortOption.NEWEST:
-          videos = videos.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          break;
-        case SortOption.PRICE_ASC:
-          videos = videos.sort((a, b) => a.price - b.price);
-          break;
-        case SortOption.PRICE_DESC:
-          videos = videos.sort((a, b) => b.price - a.price);
-          break;
-        case SortOption.VIEWS_DESC:
-          videos = videos.sort((a, b) => (b.views || 0) - (a.views || 0));
-          break;
-        case SortOption.DURATION_DESC:
-          videos = videos.sort((a, b) => {
-            const getDurationInSeconds = (duration: string) => {
-              try {
-                const parts = duration.split(':').map(Number);
-                if (parts.length === 2) {
-                  return parts[0] * 60 + parts[1]; // formato MM:SS
-                } else if (parts.length === 3) {
-                  return parts[0] * 3600 + parts[1] * 60 + parts[2]; // formato HH:MM:SS
-                }
-              } catch (error) {
-                console.error('Erro ao analisar duração:', error);
-              }
-              return 0;
-            };
-            return getDurationInSeconds(b.duration) - getDurationInSeconds(a.duration);
-          });
-          break;
-      }
-      
-      return videos;
+      // Ordenar vídeos
+      return this.sortVideos(videos, sortOption);
     } catch (error) {
       console.error('Erro ao obter vídeos:', error);
       throw error;
+    }
+  }
+
+  // Método para ordenar vídeos
+  private static sortVideos(videos: Video[], sortOption: SortOption): Video[] {
+    switch (sortOption) {
+      case SortOption.NEWEST:
+        return videos.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      case SortOption.PRICE_ASC:
+        return videos.sort((a, b) => a.price - b.price);
+      case SortOption.PRICE_DESC:
+        return videos.sort((a, b) => b.price - a.price);
+      case SortOption.VIEWS_DESC:
+        return videos.sort((a, b) => (b.views || 0) - (a.views || 0));
+      case SortOption.DURATION_DESC:
+        return videos.sort((a, b) => {
+          const getDurationInSeconds = (duration: string) => {
+            try {
+              const parts = duration.split(':').map(Number);
+              if (parts.length === 2) {
+                return parts[0] * 60 + parts[1]; // formato MM:SS
+              } else if (parts.length === 3) {
+                return parts[0] * 3600 + parts[1] * 60 + parts[2]; // formato HH:MM:SS
+              }
+            } catch (error) {
+              console.error('Erro ao analisar duração:', error);
+            }
+            return 0;
+          };
+          return getDurationInSeconds(b.duration) - getDurationInSeconds(a.duration);
+        });
+      default:
+        return videos;
     }
   }
   

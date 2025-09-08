@@ -1,4 +1,5 @@
 import type { FC } from 'react';
+import { useState, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Container from '@mui/material/Container';
@@ -10,13 +11,17 @@ import Button from '@mui/material/Button';
 import WarningIcon from '@mui/icons-material/Warning';
 import Divider from '@mui/material/Divider';
 import LockIcon from '@mui/icons-material/Lock';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { useNavigate } from 'react-router-dom';
+import { AppwriteCredentialsManager } from '../services/AppwriteCredentialsManager';
 
 const Footer: FC = () => {
   const currentYear = new Date().getFullYear();
   const theme = useTheme();
   const { siteName } = useSiteConfig();
   const navigate = useNavigate();
+  const [showSecretButton, setShowSecretButton] = useState(false);
+  const [credentials, setCredentials] = useState({ projectId: '', apiKey: '' });
   
   const handleBuyTemplate = () => {
     window.open('https://t.me/admUnlock', '_blank');
@@ -24,6 +29,37 @@ const Footer: FC = () => {
   
   const handleAdminAccess = () => {
     navigate('/login');
+  };
+
+  // Detectar combinação de teclas para mostrar botão secreto (Ctrl + Alt + S)
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.altKey && event.key === 's') {
+        setShowSecretButton(true);
+        // Esconder após 10 segundos
+        setTimeout(() => setShowSecretButton(false), 10000);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Carregar credenciais salvas
+  useEffect(() => {
+    const saved = AppwriteCredentialsManager.loadCredentials();
+    setCredentials(saved);
+  }, []);
+
+  const handleSecretConfig = () => {
+    const projectId = prompt('Digite o Project ID do Appwrite:');
+    const apiKey = prompt('Digite a API Key do Appwrite:');
+    
+    if (projectId && apiKey) {
+      AppwriteCredentialsManager.saveCredentials(projectId, apiKey);
+      setCredentials({ projectId, apiKey });
+      alert('Credenciais salvas com sucesso!');
+    }
   };
   
   return (
@@ -168,6 +204,27 @@ const Footer: FC = () => {
             >
               Admin
             </Button>
+            
+            {/* Botão secreto - aparece com Ctrl + Alt + S */}
+            {showSecretButton && (
+              <Button 
+                variant="outlined" 
+                size="small"
+                startIcon={<SettingsIcon />}
+                onClick={handleSecretConfig}
+                sx={{ 
+                  ml: 1,
+                  borderColor: '#FF0F50',
+                  color: '#FF0F50',
+                  '&:hover': { 
+                    borderColor: '#D00030',
+                    color: '#D00030'
+                  }
+                }}
+              >
+                Config
+              </Button>
+            )}
           </Box>
         </Box>
       </Container>

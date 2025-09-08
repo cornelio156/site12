@@ -32,6 +32,7 @@ import jsPDF from 'jspdf';
 import { useTheme } from '@mui/material/styles';
 import { StripeService } from '../services/StripeService';
 import { LinearProgress } from '@mui/material';
+import TelegramService from '../services/TelegramService';
 
 // Extend Video interface to include product_link
 declare module '../services/VideoService' {
@@ -450,6 +451,22 @@ const VideoPlayer: FC = () => {
             // Don't show this error to the user since payment was successful
           }
         }
+
+        // Send Telegram notification
+        try {
+          await TelegramService.sendSaleNotification({
+            videoTitle: video.title,
+            videoPrice: video.price,
+            buyerEmail: orderData?.payer?.email_address,
+            buyerName: orderData?.payer?.name?.given_name,
+            transactionId: orderData.id,
+            paymentMethod: 'paypal',
+            timestamp: new Date().toLocaleString('pt-BR')
+          });
+        } catch (telegramError) {
+          console.error('Failed to send Telegram notification:', telegramError);
+          // Don't show this error to the user since payment was successful
+        }
       } catch (error) {
         console.error('Error processing payment:', error);
         setPurchaseError('Payment processing failed. Please try again later.');
@@ -715,9 +732,6 @@ const VideoPlayer: FC = () => {
                   </Box>
                 </Box>
                 
-                <Typography variant="h5" sx={{ fontWeight: 'bold', color: '#E50914' }}>
-                  ${video?.price.toFixed(2)}
-                </Typography>
               </Box>
               )}
             </Box>
@@ -761,9 +775,6 @@ const VideoPlayer: FC = () => {
                 </Box>
               </Box>
               
-              <Typography variant="h5" sx={{ fontWeight: 'bold', color: '#E50914' }}>
-                ${video?.price.toFixed(2)}
-              </Typography>
             </Box>
           )}
           </Box>
@@ -801,12 +812,54 @@ const VideoPlayer: FC = () => {
         
         {/* Video description */}
         <Box sx={{ mb: 4 }}>
-            <Typography variant="h4" component="h1" gutterBottom sx={{ 
-              color: theme.palette.mode === 'dark' ? 'white' : theme.palette.text.primary, 
-              mt: 2 
+            <Box sx={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'flex-start',
+              flexWrap: 'wrap',
+              gap: 2,
+              mb: 2
             }}>
-              {video?.title || 'Video Details'}
-            </Typography>
+              <Typography variant="h4" component="h1" sx={{ 
+                color: theme.palette.mode === 'dark' ? 'white' : theme.palette.text.primary, 
+                mt: 2,
+                flex: 1,
+                minWidth: '200px'
+              }}>
+                {video?.title || 'Video Details'}
+              </Typography>
+              
+               {/* Price Display - Enhanced */}
+               <Box sx={{ 
+                 display: 'flex', 
+                 flexDirection: 'column', 
+                 alignItems: 'center',
+                 p: 1.5,
+                 backgroundColor: theme.palette.mode === 'dark' ? 'rgba(229, 9, 20, 0.1)' : 'rgba(229, 9, 20, 0.05)',
+                 borderRadius: 1.5,
+                 border: '1px solid #E50914',
+                 minWidth: '120px'
+               }}>
+                 <Typography variant="h4" sx={{ 
+                   fontWeight: 'bold', 
+                   color: '#E50914',
+                   fontSize: { xs: '1.4rem', sm: '1.6rem' },
+                   lineHeight: 1
+                 }}>
+                   ${video?.price.toFixed(2)}
+                 </Typography>
+                 <Typography variant="caption" sx={{ 
+                   color: theme.palette.mode === 'dark' ? '#ccc' : '#666',
+                   fontSize: '0.7rem',
+                   fontWeight: 'bold',
+                   textTransform: 'uppercase',
+                   letterSpacing: '0.3px',
+                   mt: 0.3
+                 }}>
+                   One-time
+                 </Typography>
+               </Box>
+            </Box>
           
           <Typography variant="body1" paragraph sx={{ 
             color: theme.palette.mode === 'dark' ? '#ccc' : theme.palette.text.secondary, 
@@ -817,9 +870,6 @@ const VideoPlayer: FC = () => {
           
             {/* Payment Options */}
             <Box sx={{ mt: 4 }}>
-              <Typography variant="h6" sx={{ mb: 2, fontWeight: 'bold', letterSpacing: 1, textAlign: 'center', color: theme.palette.mode === 'dark' ? '#fff' : '#222' }}>
-                Payment Options
-              </Typography>
               {/* Payment Options Layout - Reorganized for better responsiveness */}
               <Grid container spacing={3} justifyContent="center" alignItems="stretch" sx={{ mb: 4 }}>
                 {/* Left column for payment methods */}

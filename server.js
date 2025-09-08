@@ -1,16 +1,16 @@
 /**
  * Servidor Express local para desenvolvimento
  * Este arquivo usa o formato ESM
+ * Versão limpa sem funcionalidades de email
  */
 // Servidor Express para desenvolvimento local
 import express from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
-import { Client, Databases } from 'node-appwrite';
+import { Client, Databases, Storage, Permission, Role, ID } from 'node-appwrite';
 import Stripe from 'stripe';
 import dotenv from 'dotenv';
 import http from 'http';
-import nodemailer from 'nodemailer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -36,8 +36,333 @@ if (process.env.NODE_ENV === 'production') {
 
 // Rota principal para verificar se o servidor está rodando
 app.get('/api', (req, res) => {
-  res.send('API local rodando! Use /api/create-checkout-session para criar sessões de checkout do Stripe, /api/send-paypal-confirmation para enviar emails de confirmação PayPal, ou /api/test-email-config para testar a configuração de email.');
+  res.send('API local rodando! Endpoints disponíveis:\n- /api/setup (teste de conexão Appwrite)\n- /api/create-checkout-session (sessões de checkout Stripe)');
 });
+
+// Endpoint para setup da base de dados Appwrite
+app.post('/api/setup', async (req, res) => {
+  // Configurar CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  console.log('📥 Requisição recebida:', req.body);
+  const { projectId, apiKey, action } = req.body;
+
+  if (!projectId || !apiKey) {
+    return res.status(400).json({ message: 'Project ID e API Key são obrigatórios' });
+  }
+
+  try {
+    // Configurar cliente Appwrite
+    const client = new Client()
+      .setEndpoint('https://fra.cloud.appwrite.io/v1')
+      .setProject(projectId)
+      .setKey(apiKey);
+
+    const databases = new Databases(client);
+    const storage = new Storage(client);
+
+    // IDs das collections e buckets
+    const databaseId = 'video_site_db';
+    const videoCollectionId = 'videos';
+    const userCollectionId = 'users';
+    const siteConfigCollectionId = 'site_config';
+    const sessionCollectionId = 'sessions';
+    const videosBucketId = 'videos_bucket';
+    const thumbnailsBucketId = 'thumbnails_bucket';
+
+    console.log('🔍 Ação solicitada:', action);
+    switch (action) {
+      case 'test-connection':
+        try {
+          await databases.list();
+          return res.json({ 
+            success: true, 
+            message: 'Conexão estabelecida com sucesso' 
+          });
+        } catch (error) {
+          console.error('Erro na conexão:', error);
+          return res.status(400).json({ 
+            success: false, 
+            message: 'Falha na conexão: Credenciais inválidas ou projeto não encontrado' 
+          });
+        }
+
+      case 'create-database':
+        try {
+          await databases.create(databaseId, 'Video Site Database');
+          return res.json({ success: true, message: 'Database criada com sucesso' });
+        } catch (error) {
+          if (error.message.includes('already exists')) {
+            return res.json({ success: true, message: 'Database já existe' });
+          }
+          throw error;
+        }
+
+      case 'create-collection':
+        const { collectionId, collectionName, collectionType } = req.body;
+        
+        try {
+          // Criar collection
+          await databases.createCollection(
+            databaseId,
+            collectionId,
+            collectionName,
+            [
+              Permission.read(Role.any()),
+              Permission.write(Role.users()),
+              Permission.create(Role.users()),
+              Permission.update(Role.users()),
+              Permission.delete(Role.users())
+            ]
+          );
+
+          // Aguardar um pouco para a collection ser criada
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          // Criar atributos baseados no tipo
+          const attributes = getAttributesForType(collectionType);
+          for (const attr of attributes) {
+            try {
+              await createAttribute(databases, databaseId, collectionId, attr);
+              // Aguardar entre criação de atributos
+              await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (attrError) {
+              // Ignorar se atributo já existe
+              if (!attrError.message.includes('already exists')) {
+                console.warn(`Erro ao criar atributo ${attr.key}:`, attrError);
+              }
+            }
+          }
+
+          // Aguardar um pouco antes de criar índices
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          // Criar índices
+          const indexes = getIndexesForType(collectionType);
+          for (const index of indexes) {
+            try {
+              await databases.createIndex(databaseId, collectionId, index.key, index.type, index.attributes);
+              // Aguardar entre criação de índices
+              await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (indexError) {
+              // Ignorar se índice já existe
+              if (!indexError.message.includes('already exists')) {
+                console.warn(`Erro ao criar índice ${index.key}:`, indexError);
+              }
+            }
+          }
+
+          return res.json({ success: true, message: `Collection '${collectionName}' criada e configurada` });
+        } catch (error) {
+          if (error.message.includes('already exists')) {
+            return res.json({ success: true, message: `Collection '${collectionName}' já existe` });
+          }
+          throw error;
+        }
+
+      case 'create-bucket':
+        const { bucketId, bucketName } = req.body;
+        
+        try {
+          await storage.createBucket(
+            bucketId,
+            bucketName,
+            [
+              Permission.read(Role.any()),
+              Permission.write(Role.users()),
+              Permission.create(Role.users()),
+              Permission.update(Role.users()),
+              Permission.delete(Role.users())
+            ]
+          );
+          return res.json({ success: true, message: `Bucket '${bucketName}' criado` });
+        } catch (error) {
+          if (error.message.includes('already exists')) {
+            return res.json({ success: true, message: `Bucket '${bucketName}' já existe` });
+          }
+          throw error;
+        }
+
+      case 'create-initial-data':
+        try {
+          // Verificar se já existe configuração do site
+          const siteConfigs = await databases.listDocuments(databaseId, siteConfigCollectionId);
+          
+          if (siteConfigs.documents.length === 0) {
+            // Criar configuração inicial do site
+            await databases.createDocument(
+              databaseId,
+              siteConfigCollectionId,
+              ID.unique(),
+              {
+                site_name: 'Video Site',
+                video_list_title: 'Featured Videos',
+                crypto: []
+              }
+            );
+            return res.json({ success: true, message: 'Configuração inicial do site criada' });
+          } else {
+            return res.json({ success: true, message: 'Configuração do site já existe' });
+          }
+        } catch (error) {
+          throw error;
+        }
+
+      default:
+        console.log('❌ Ação não reconhecida:', action);
+        return res.status(400).json({ message: 'Ação não reconhecida' });
+    }
+
+  } catch (error) {
+    console.error('Erro no setup:', error);
+    return res.status(500).json({ 
+      message: `Erro interno: ${error.message}` 
+    });
+  }
+});
+
+// Funções auxiliares para criar atributos e índices
+function getAttributesForType(type) {
+  switch (type) {
+    case 'video':
+      return [
+        { key: 'title', type: 'string', size: 255, required: true },
+        { key: 'description', type: 'string', size: 2000, required: false },
+        { key: 'price', type: 'float', required: true, min: 0 },
+        { key: 'duration', type: 'integer', required: false, min: 0 },
+        { key: 'video_id', type: 'string', size: 255, required: false },
+        { key: 'thumbnail_id', type: 'string', size: 255, required: false },
+        { key: 'created_at', type: 'datetime', required: false },
+        { key: 'is_active', type: 'boolean', required: false, default: true },
+        { key: 'views', type: 'integer', required: false, min: 0, default: 0 },
+        { key: 'product_link', type: 'string', size: 500, required: false }
+      ];
+
+    case 'user':
+      return [
+        { key: 'email', type: 'string', size: 255, required: true },
+        { key: 'name', type: 'string', size: 255, required: true },
+        { key: 'password', type: 'string', size: 255, required: true },
+        { key: 'created_at', type: 'datetime', required: false }
+      ];
+
+    case 'config':
+      return [
+        { key: 'site_name', type: 'string', size: 255, required: true },
+        { key: 'paypal_client_id', type: 'string', size: 255, required: false },
+        { key: 'stripe_publishable_key', type: 'string', size: 255, required: false },
+        { key: 'stripe_secret_key', type: 'string', size: 255, required: false },
+        { key: 'telegram_username', type: 'string', size: 255, required: false },
+        { key: 'video_list_title', type: 'string', size: 255, required: false },
+        { key: 'crypto', type: 'string', size: 2000, required: false, array: true },
+        { key: 'email_host', type: 'string', size: 255, required: false },
+        { key: 'email_port', type: 'string', size: 10, required: false },
+        { key: 'email_secure', type: 'boolean', required: false },
+        { key: 'email_user', type: 'string', size: 255, required: false },
+        { key: 'email_pass', type: 'string', size: 255, required: false },
+        { key: 'email_from', type: 'string', size: 255, required: false }
+      ];
+
+    case 'session':
+      return [
+        { key: 'user_id', type: 'string', size: 255, required: true },
+        { key: 'token', type: 'string', size: 255, required: true },
+        { key: 'expires_at', type: 'datetime', required: true },
+        { key: 'created_at', type: 'datetime', required: false },
+        { key: 'ip_address', type: 'string', size: 45, required: false },
+        { key: 'user_agent', type: 'string', size: 1000, required: false }
+      ];
+
+    default:
+      return [];
+  }
+}
+
+function getIndexesForType(type) {
+  switch (type) {
+    case 'video':
+      return [
+        { key: 'title_index', type: 'key', attributes: ['title'] },
+        { key: 'created_at_index', type: 'key', attributes: ['created_at'] },
+        { key: 'is_active_index', type: 'key', attributes: ['is_active'] }
+      ];
+
+    case 'user':
+      return [
+        { key: 'email_index', type: 'unique', attributes: ['email'] }
+      ];
+
+    case 'session':
+      return [
+        { key: 'token_index', type: 'unique', attributes: ['token'] },
+        { key: 'user_id_index', type: 'key', attributes: ['user_id'] },
+        { key: 'expires_at_index', type: 'key', attributes: ['expires_at'] }
+      ];
+
+    default:
+      return [];
+  }
+}
+
+async function createAttribute(databases, databaseId, collectionId, attr) {
+  if (attr.type === 'string') {
+    await databases.createStringAttribute(
+      databaseId,
+      collectionId,
+      attr.key,
+      attr.size,
+      attr.required,
+      attr.default,
+      attr.array || false
+    );
+  } else if (attr.type === 'integer') {
+    await databases.createIntegerAttribute(
+      databaseId,
+      collectionId,
+      attr.key,
+      attr.required,
+      attr.min,
+      attr.max,
+      attr.default,
+      attr.array || false
+    );
+  } else if (attr.type === 'float') {
+    await databases.createFloatAttribute(
+      databaseId,
+      collectionId,
+      attr.key,
+      attr.required,
+      attr.min,
+      attr.max,
+      attr.default,
+      attr.array || false
+    );
+  } else if (attr.type === 'boolean') {
+    await databases.createBooleanAttribute(
+      databaseId,
+      collectionId,
+      attr.key,
+      attr.required,
+      attr.default,
+      attr.array || false
+    );
+  } else if (attr.type === 'datetime') {
+    await databases.createDatetimeAttribute(
+      databaseId,
+      collectionId,
+      attr.key,
+      attr.required,
+      attr.default,
+      attr.array || false
+    );
+  }
+}
 
 // Endpoint para criar sessão de checkout do Stripe
 app.post('/api/create-checkout-session', async (req, res) => {
@@ -45,23 +370,21 @@ app.post('/api/create-checkout-session', async (req, res) => {
     // Buscar chave secreta do Stripe no Appwrite
     let stripeSecretKey = '';
     
-    // Inicializar cliente Appwrite
+    // Inicializar cliente Appwrite com variáveis de ambiente
     const client = new Client()
-      .setEndpoint(process.env.APPWRITE_ENDPOINT)
-      .setProject(process.env.APPWRITE_PROJECT_ID)
-      .setKey(process.env.APPWRITE_API_KEY);
+      .setEndpoint('https://fra.cloud.appwrite.io/v1') // Endpoint fixo
+      .setProject(process.env.VITE_APPWRITE_PROJECT_ID)
+      .setKey(process.env.VITE_APPWRITE_API_KEY);
       
     const databases = new Databases(client);
     
     try {
       // Buscar configurações do site no Appwrite
       console.log('Buscando configurações no Appwrite...');
-      console.log('Database ID:', process.env.APPWRITE_DATABASE_ID);
-      console.log('Collection ID:', process.env.APPWRITE_SITE_CONFIG_COLLECTION_ID);
       
       const response = await databases.listDocuments(
-        process.env.APPWRITE_DATABASE_ID,
-        process.env.APPWRITE_SITE_CONFIG_COLLECTION_ID
+        'video_site_db', // Database ID consistente
+        'site_config'    // Site Config Collection ID consistente
       );
       
       if (response.documents.length > 0) {
@@ -70,81 +393,69 @@ app.post('/api/create-checkout-session', async (req, res) => {
         console.log('Chave secreta do Stripe obtida com sucesso do Appwrite');
       } else {
         console.log('Nenhum documento de configuração encontrado no Appwrite');
-        return res.status(500).json({ error: 'Configurações do Stripe não encontradas no Appwrite' });
       }
     } catch (appwriteError) {
       console.error('Erro ao buscar chave do Stripe no Appwrite:', appwriteError);
-      return res.status(500).json({ 
-        error: 'Erro ao buscar configurações do Stripe',
-        details: appwriteError.message
-      });
     }
     
+    // Fallback para variável de ambiente se não encontrar no Appwrite
     if (!stripeSecretKey) {
-      console.error('Chave secreta do Stripe não encontrada');
-      return res.status(500).json({ error: 'Chave secreta do Stripe não encontrada no Appwrite' });
+      stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+      if (stripeSecretKey) {
+        console.log('Usando chave do Stripe da variável de ambiente como fallback');
+      } else {
+        return res.status(500).json({ 
+          error: 'Chave secreta do Stripe não encontrada nem no Appwrite nem nas variáveis de ambiente' 
+        });
+      }
     }
+    
+    // Inicializar Stripe com a chave obtida do Appwrite
+    const stripe = new Stripe(stripeSecretKey);
     
     const { amount, currency = 'usd', name, success_url, cancel_url } = req.body;
-    console.log('Dados recebidos:', { amount, currency, success_url, cancel_url });
-    
-    if (!amount || !success_url || !cancel_url) {
-      return res.status(400).json({ error: 'Parâmetros obrigatórios ausentes' });
-    }
-    
-    // Inicializar o Stripe com a chave obtida
-    const stripe = new Stripe(stripeSecretKey);
 
-    // Lista de nomes de produtos genéricos
-    const productNames = [
-      "Personal Development Ebook",
-      "Financial Freedom Ebook",
-      "Digital Marketing Guide",
-      "Health & Wellness Ebook",
-      "Productivity Masterclass",
-      "Mindfulness & Meditation Guide",
-      "Entrepreneurship Blueprint",
-      "Wellness Program",
-      "Success Coaching",
-      "Executive Mentoring",
-      "Learning Resources",
-      "Online Course Access",
-      "Premium Content Subscription",
-      "Digital Asset Package"
-    ];
-    
-    // Selecionar um nome aleatório
-    const randomProductName = productNames[Math.floor(Math.random() * productNames.length)];
-    
-    console.log('Criando sessão de checkout para:', {
-      amount: amount,
-      currency: currency,
-      product: randomProductName,
-    });
-    
-    // Criar a sessão de checkout
+    console.log('Dados recebidos para checkout:', JSON.stringify(req.body, null, 2));
+
+    // Validar os dados recebidos
+    if (!amount || typeof amount !== 'number' || amount <= 0) {
+      return res.status(400).json({ error: 'Amount é obrigatório e deve ser um número positivo' });
+    }
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ error: 'Name é obrigatório e deve ser uma string' });
+    }
+    if (!success_url || typeof success_url !== 'string') {
+      return res.status(400).json({ error: 'success_url é obrigatório e deve ser uma string' });
+    }
+    if (!cancel_url || typeof cancel_url !== 'string') {
+      return res.status(400).json({ error: 'cancel_url é obrigatório e deve ser uma string' });
+    }
+
+    // Criar line_items baseado nos dados recebidos
+    const lineItems = [{
+      price_data: {
+        currency: 'usd', // Sempre usar USD
+        product_data: {
+          name: name,
+        },
+        unit_amount: Math.round(amount), // Amount já deve vir em centavos
+      },
+      quantity: 1,
+    }];
+
+    console.log('Line items criados:', JSON.stringify(lineItems, null, 2));
+
+    // Criar sessão de checkout
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency,
-            product_data: {
-              name: randomProductName,
-            },
-            unit_amount: Math.round(amount),
-          },
-          quantity: 1,
-        },
-      ],
+      line_items: lineItems,
       mode: 'payment',
-      success_url,
-      cancel_url,
+      success_url: success_url,
+      cancel_url: cancel_url,
+      billing_address_collection: 'auto',
     });
     
-    console.log('Sessão criada com sucesso:', session.id);
-    res.status(200).json({ sessionId: session.id });
-    
+    res.json({ sessionId: session.id, url: session.url });
   } catch (error) {
     console.error('Erro ao criar sessão de checkout:', error);
     res.status(500).json({ 
@@ -154,320 +465,43 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
-// Função para verificar se uma porta está em uso
-function isPortInUse(port) {
-  return new Promise((resolve, reject) => {
-    const server = http.createServer()
-      .once('error', err => {
-        if (err.code === 'EADDRINUSE') {
-          resolve(true);
-        } else {
-          reject(err);
-        }
-      })
-      .once('listening', () => {
-        server.once('close', () => resolve(false));
-        server.close();
-      })
-      .listen(port);
-  });
-}
-
-// Tentar iniciar o servidor na porta padrão ou em uma porta alternativa
-async function startServer() {
-  // Checar se a porta padrão está em uso
-  if (port === defaultPort) {
-    const portInUse = await isPortInUse(port);
-    if (portInUse) {
-      // Tentar portas alternativas
-      for (let alternativePort = 3001; alternativePort < 3010; alternativePort++) {
-        const alternativePortInUse = await isPortInUse(alternativePort);
-        if (!alternativePortInUse) {
-          port = alternativePort;
-          console.log(`Porta ${defaultPort} está em uso, usando porta alternativa ${port}`);
-          break;
-        }
-      }
-    }
-  }
-
-  // Iniciar servidor
-  app.listen(port, () => {
-    console.log(`Servidor API local rodando na porta ${port}`);
-    console.log(`Acesse http://localhost:${port}/ para verificar`);
-    
-    // Se estamos usando uma porta diferente da 3000, mostrar uma mensagem especial
-    if (port !== 3000) {
-      console.log(`ATENÇÃO: A API está rodando na porta ${port} em vez da porta padrão 3000.`);
-      console.log(`Se você configurou sua aplicação para usar http://localhost:3000, atualize para http://localhost:${port}`);
-    }
-  });
-}
-
-// Adicionar endpoint para enviar emails de confirmação PayPal
-app.post('/api/send-paypal-confirmation', async (req, res) => {
-  try {
-    const { buyerEmail, buyerName, transactionId, isCompany } = req.body;
-
-    if (!buyerEmail || !transactionId) {
-      return res.status(400).json({ error: 'Required parameters missing' });
-    }
-
-    // Get email configuration from Appwrite
-    let emailHost = 'smtp.gmail.com';
-    let emailPort = '587';
-    let emailSecure = false;
-    let emailUser = '';
-    let emailPass = '';
-    let emailFrom = '';
-    
-    // Inicializar cliente Appwrite
-    const appwriteClient = new Client()
-      .setEndpoint(process.env.APPWRITE_ENDPOINT)
-      .setProject(process.env.APPWRITE_PROJECT_ID)
-      .setKey(process.env.APPWRITE_API_KEY);
-      
-    const appwriteDatabases = new Databases(appwriteClient);
-    
-    try {
-      // Buscar configurações do site no Appwrite
-      console.log('Buscando configurações de email no Appwrite...');
-      console.log('Database ID:', process.env.APPWRITE_DATABASE_ID);
-      console.log('Collection ID:', process.env.APPWRITE_SITE_CONFIG_COLLECTION_ID);
-      
-      const response = await appwriteDatabases.listDocuments(
-        process.env.APPWRITE_DATABASE_ID,
-        process.env.APPWRITE_SITE_CONFIG_COLLECTION_ID
-      );
-      
-      if (response.documents.length > 0) {
-        const config = response.documents[0];
-        emailHost = config.email_host || 'smtp.gmail.com';
-        emailPort = config.email_port || '587';
-        emailSecure = config.email_secure || false;
-        emailUser = config.email_user || '';
-        emailPass = config.email_pass || '';
-        emailFrom = config.email_from || '';
-        console.log('Configurações de email obtidas com sucesso do Appwrite');
-      }
-    } catch (appwriteError) {
-      console.error('Erro ao buscar configurações de email no Appwrite:', appwriteError);
-      // Vai usar as variáveis de ambiente como fallback
-    }
-    
-    // Use as variáveis de ambiente como fallback
-    if (!emailUser) emailUser = process.env.EMAIL_USER || '';
-    if (!emailPass) emailPass = process.env.EMAIL_PASS || '';
-    if (!emailFrom) emailFrom = process.env.EMAIL_FROM || emailUser;
-    
-    // Verificar se as credenciais de email estão configuradas
-    if (!emailUser || !emailPass) {
-      console.error('Email credentials not configured');
-      return res.status(500).json({ 
-        error: 'Email service not configured. Please set up email credentials in the admin panel or .env file.'
-      });
-    }
-
-    // Create a nodemailer transporter
-    const transporter = nodemailer.createTransport({
-      host: emailHost,
-      port: parseInt(emailPort),
-      secure: emailSecure,
-      auth: {
-        user: emailUser,
-        pass: emailPass,
-      },
-    });
-
-    // Prepare email content
-    const subject = 'Please confirm your PayPal order receipt';
-    const text = `
-Hi ${buyerName || 'there'},
-
-I hope you're doing well!
-
-I'm kindly asking if you could please confirm the receipt of your order on PayPal. This will help release the pending funds on my side.
-
-Here's how you can do it:
-
-Log in to your PayPal account.
-
-Go to Activity and find the transaction with this ID:
-Transaction ID: ${transactionId}
-
-Click Confirm Receipt (or Confirm Order Received).
-
-Please let me know if you need any help. I'd really appreciate your support!
-
-Best regards,
-${isCompany || 'Seller'}
-    `;
-
-    const html = `
-<p>Hi ${buyerName || 'there'},</p>
-
-<p>I hope you're doing well!</p>
-
-<p>I'm kindly asking if you could please confirm the receipt of your order on PayPal. This will help release the pending funds on my side.</p>
-
-<p>Here's how you can do it:</p>
-
-<ol>
-  <li>Log in to your PayPal account.</li>
-  <li>Go to Activity and find the transaction with this ID:<br/>
-  <strong>Transaction ID: ${transactionId}</strong></li>
-  <li>Click <strong>Confirm Receipt</strong> (or <strong>Confirm Order Received</strong>).</li>
-</ol>
-
-<p>Please let me know if you need any help. I'd really appreciate your support!</p>
-
-<p>Best regards,<br/>
-${isCompany || 'Seller'}</p>
-    `;
-
-    // Send email
-    const info = await transporter.sendMail({
-      from: emailFrom || emailUser,
-      to: buyerEmail,
-      subject,
-      text,
-      html,
-    });
-
-    console.log('Email sent:', info.messageId);
-    res.status(200).json({
-      success: true,
-      messageId: info.messageId,
-    });
-  } catch (error) {
-    console.error('Error sending confirmation email:', error);
-    res.status(500).json({ 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined 
-    });
-  }
-});
-
-// Adicionar endpoint para testar configuração de email
-app.post('/api/test-email-config', async (req, res) => {
-  try {
-    const { testEmail } = req.body;
-
-    if (!testEmail) {
-      return res.status(400).json({ error: 'Email para teste é obrigatório' });
-    }
-
-    // Get email configuration from Appwrite
-    let emailHost = 'smtp.gmail.com';
-    let emailPort = '587';
-    let emailSecure = false;
-    let emailUser = '';
-    let emailPass = '';
-    let emailFrom = '';
-    
-    // Inicializar cliente Appwrite
-    const appwriteClient = new Client()
-      .setEndpoint(process.env.APPWRITE_ENDPOINT)
-      .setProject(process.env.APPWRITE_PROJECT_ID)
-      .setKey(process.env.APPWRITE_API_KEY);
-      
-    const appwriteDatabases = new Databases(appwriteClient);
-    
-    try {
-      // Buscar configurações do site no Appwrite
-      console.log('Buscando configurações de email no Appwrite...');
-      
-      const response = await appwriteDatabases.listDocuments(
-        process.env.APPWRITE_DATABASE_ID,
-        process.env.APPWRITE_SITE_CONFIG_COLLECTION_ID
-      );
-      
-      if (response.documents.length > 0) {
-        const config = response.documents[0];
-        emailHost = config.email_host || 'smtp.gmail.com';
-        emailPort = config.email_port || '587';
-        emailSecure = config.email_secure || false;
-        emailUser = config.email_user || '';
-        emailPass = config.email_pass || '';
-        emailFrom = config.email_from || '';
-        console.log('Configurações de email obtidas com sucesso do Appwrite');
-      }
-    } catch (appwriteError) {
-      console.error('Erro ao buscar configurações de email no Appwrite:', appwriteError);
-      // Vai usar as variáveis de ambiente como fallback
-    }
-    
-    // Use as variáveis de ambiente como fallback
-    if (!emailUser) emailUser = process.env.EMAIL_USER || '';
-    if (!emailPass) emailPass = process.env.EMAIL_PASS || '';
-    if (!emailFrom) emailFrom = process.env.EMAIL_FROM || emailUser;
-    
-    // Verificar se as credenciais de email estão configuradas
-    if (!emailUser || !emailPass) {
-      console.error('Email credentials not configured');
-      return res.status(500).json({ 
-        error: 'Email service not configured. Please set up email credentials in the admin panel or .env file.'
-      });
-    }
-
-    // Create a transporter object using the configured SMTP settings
-    const transporter = nodemailer.createTransport({
-      host: emailHost,
-      port: parseInt(emailPort),
-      secure: emailSecure,
-      auth: {
-        user: emailUser,
-        pass: emailPass,
-      },
-    });
-
-    // Send test email
-    const info = await transporter.sendMail({
-      from: emailFrom || emailUser,
-      to: testEmail,
-      subject: 'Email Configuration Test',
-      text: 'If you received this email, your email configuration is working correctly!',
-      html: `
-        <h2>Email Configuration Test</h2>
-        <p>This is a test email to verify your email configuration.</p>
-        <p>If you received this email, your email settings are working correctly!</p>
-        <hr>
-        <h3>Configuration Details:</h3>
-        <ul>
-          <li><strong>SMTP Host:</strong> ${emailHost}</li>
-          <li><strong>SMTP Port:</strong> ${emailPort}</li>
-          <li><strong>Secure Connection:</strong> ${emailSecure ? 'Yes' : 'No'}</li>
-          <li><strong>Email User:</strong> ${emailUser}</li>
-        </ul>
-        <p>You can now send PayPal confirmation emails through your application.</p>
-      `,
-    });
-
-    console.log('Email de teste enviado com sucesso:', info.messageId);
-    res.status(200).json({
-      success: true,
-      messageId: info.messageId,
-      message: `Email de teste enviado com sucesso para ${testEmail}`,
-    });
-  } catch (error) {
-    console.error('Erro ao enviar email de teste:', error);
-    res.status(500).json({ 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined 
-    });
-  }
-});
-
-// Configuração para SPA - deve vir após todas as outras rotas de API
+// Rota catch-all para SPA (deve vir por último)
 if (process.env.NODE_ENV === 'production') {
-  // Configuração de SPA - redirecionar todas as solicitações para index.html
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
   });
 }
 
-// Iniciar o servidor
-startServer().catch(err => {
-  console.error('Erro ao iniciar o servidor:', err);
-  process.exit(1);
-}); 
+// Função para tentar conectar na porta especificada
+function startServer(targetPort) {
+  const server = http.createServer(app);
+  
+  server.listen(targetPort, () => {
+    console.log(`🚀 Servidor rodando na porta ${targetPort}`);
+    console.log(`📱 Acesse: http://localhost:${targetPort}`);
+    console.log('💳 API Stripe configurada e pronta para uso!');
+    console.log('📄 Use /api/create-checkout-session para criar sessões de checkout Stripe.');
+    console.log('🔧 API de setup Appwrite configurada!');
+    console.log('📄 Use /api/setup para testar conexão com Appwrite.');
+    
+    if (port !== 3000) {
+      console.log(`ATENÇÃO: A API está rodando na porta ${port} em vez da porta padrão 3000.`);
+      console.log(`Se você configurou sua aplicação para usar http://localhost:3000, atualize para http://localhost:${port}`);
+    }
+  });
+
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.log(`❌ Porta ${targetPort} está em uso. Tentando porta ${targetPort + 1}...`);
+      port = targetPort + 1;
+      startServer(port);
+    } else {
+      console.error('❌ Erro ao iniciar servidor:', error);
+    }
+  });
+}
+
+// Iniciar servidor
+if (process.env.NODE_ENV !== 'test') {
+  startServer(port);
+}

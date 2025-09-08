@@ -9,10 +9,15 @@ export default defineConfig(({ mode }) => {
   
   return {
     plugins: [react()],
+    optimizeDeps: {
+      include: ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled']
+    },
     define: {
       // Make env variables available to the client-side code
       'process.env.VITE_STRIPE_PUBLISHABLE_KEY': JSON.stringify(env.VITE_STRIPE_PUBLISHABLE_KEY),
       'process.env.VITE_API_URL': JSON.stringify(env.VITE_API_URL || ''),
+      'process.env.VITE_APPWRITE_PROJECT_ID': JSON.stringify(env.VITE_APPWRITE_PROJECT_ID || ''),
+      'process.env.VITE_APPWRITE_API_KEY': JSON.stringify(env.VITE_APPWRITE_API_KEY || ''),
     },
     server: {
       // Configure a middleware for handling API requests during development
@@ -38,6 +43,13 @@ export default defineConfig(({ mode }) => {
         input: {
           main: path.resolve(__dirname, 'index.html'),
         },
+        external: [],
+        output: {
+          manualChunks: {
+            vendor: ['react', 'react-dom'],
+            mui: ['@mui/material', '@mui/icons-material']
+          }
+        }
       }
     }
   }

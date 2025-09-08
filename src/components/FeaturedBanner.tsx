@@ -7,7 +7,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import InfoIcon from '@mui/icons-material/Info';
 import WarningIcon from '@mui/icons-material/Warning';
 import { VideoService, Video } from '../services/VideoService';
-import Chip from '@mui/material/Chip';
+import { Chip } from '@mui/material';
 
 interface FeaturedBannerProps {
   onError?: (error: string) => void;
@@ -16,52 +16,105 @@ interface FeaturedBannerProps {
 const FeaturedBanner = ({ onError }: FeaturedBannerProps) => {
   const [featuredVideo, setFeaturedVideo] = useState<Video | null>(null);
   const [loading, setLoading] = useState(true);
+  const [allVideos, setAllVideos] = useState<Video[]>([]);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [timeUntilNext, setTimeUntilNext] = useState(300); // 5 minutes = 300 seconds
 
-  useEffect(() => {
-    // Check if we already have a featured video stored in session
-    const storedFeaturedVideo = sessionStorage.getItem('featuredVideo');
+  // Function to calculate time until next change based on global timestamp
+  const calculateTimeUntilNext = () => {
+    const now = Date.now();
+    const intervalMs = 5 * 60 * 1000; // 5 minutes in milliseconds
+    const timeSinceLastChange = now % intervalMs;
+    const timeUntilNextChange = intervalMs - timeSinceLastChange;
+    return Math.ceil(timeUntilNextChange / 1000); // Convert to seconds
+  };
+
+  // Function to get a deterministic video based on current time interval
+  const getVideoForCurrentInterval = (videos: Video[]) => {
+    if (videos.length === 0) return null;
     
-    if (storedFeaturedVideo) {
-      try {
-        // If we already have a stored video, use it
-        setFeaturedVideo(JSON.parse(storedFeaturedVideo));
-        setLoading(false);
-        return;
-      } catch (error) {
-        console.error('Error parsing stored featured video:', error);
-        // If there's an error parsing the stored video, fetch a new one
-      }
-    }
+    const now = Date.now();
+    const intervalMs = 5 * 60 * 1000; // 5 minutes
+    const currentInterval = Math.floor(now / intervalMs);
+    
+    // Use the interval number as seed for deterministic selection
+    const videoIndex = currentInterval % videos.length;
+    return videos[videoIndex];
+  };
 
-    // If we don't have a stored video, fetch a new one
-    const fetchRandomVideo = async () => {
-      try {
+  // Function to fetch a video for current time interval
+  const fetchVideoForCurrentInterval = async (isTransition = false) => {
+    try {
+      if (isTransition) {
+        setIsTransitioning(true);
+      } else {
         setLoading(true);
-        // Fetch all videos
+      }
+      
+      // If we don't have videos yet, fetch them
+      if (allVideos.length === 0) {
         const videos = await VideoService.getAllVideos();
+        setAllVideos(videos);
         
         if (videos.length > 0) {
-          // Select a random video
-          const randomIndex = Math.floor(Math.random() * videos.length);
-          const selectedVideo = videos[randomIndex];
-          
-          // Store the selected video in session for future use
-          sessionStorage.setItem('featuredVideo', JSON.stringify(selectedVideo));
-          
+          // Select video based on current time interval
+          const selectedVideo = getVideoForCurrentInterval(videos);
+          if (selectedVideo) {
+            setFeaturedVideo(selectedVideo);
+          }
+        }
+      } else {
+        // Use existing videos to select based on current interval
+        const selectedVideo = getVideoForCurrentInterval(allVideos);
+        if (selectedVideo) {
           setFeaturedVideo(selectedVideo);
         }
-      } catch (error) {
-        console.error('Error fetching featured video:', error);
-        if (onError) {
-          onError('Failed to load featured content');
-        }
-      } finally {
-        setLoading(false);
       }
-    };
+    } catch (error) {
+      console.error('Error fetching featured video:', error);
+      if (onError) {
+        onError('Failed to load featured content');
+      }
+    } finally {
+      setLoading(false);
+      if (isTransition) {
+        // Add a small delay for smooth transition
+        setTimeout(() => {
+          setIsTransitioning(false);
+        }, 500);
+      }
+    }
+  };
 
-    fetchRandomVideo();
-  }, [onError]);
+  useEffect(() => {
+    // Initial load
+    fetchVideoForCurrentInterval();
+    
+    // Set initial countdown
+    setTimeUntilNext(calculateTimeUntilNext());
+  }, []);
+
+  // Set up interval to change video every 5 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (allVideos.length > 0) {
+        fetchVideoForCurrentInterval(true); // Pass true to indicate this is a transition
+        setTimeUntilNext(calculateTimeUntilNext()); // Reset countdown based on global time
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+
+    // Cleanup interval on component unmount
+    return () => clearInterval(interval);
+  }, [allVideos.length]);
+
+  // Countdown timer that syncs with global time
+  useEffect(() => {
+    const countdownInterval = setInterval(() => {
+      setTimeUntilNext(calculateTimeUntilNext());
+    }, 1000);
+
+    return () => clearInterval(countdownInterval);
+  }, []);
 
   if (loading || !featuredVideo) {
     return null; // Or a skeleton loader
@@ -80,6 +133,8 @@ const FeaturedBanner = ({ onError }: FeaturedBannerProps) => {
         width: '100%',
         overflow: 'hidden',
         mb: 4,
+        opacity: isTransitioning ? 0.7 : 1,
+        transition: 'opacity 0.5s ease-in-out',
       }}
     >
       {/* Age verification banner */}
@@ -102,6 +157,41 @@ const FeaturedBanner = ({ onError }: FeaturedBannerProps) => {
         <WarningIcon sx={{ color: '#FF0F50' }} />
         <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
           18+ ADULT CONTENT • By continuing, you confirm you are at least 18 years old
+        </Typography>
+      </Box>
+
+      {/* Auto-change indicator */}
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          backgroundColor: 'rgba(255, 15, 80, 0.9)',
+          color: 'white',
+          padding: '8px 12px',
+          zIndex: 3,
+          borderRadius: '0 0 0 8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+        }}
+      >
+        <Box
+          sx={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            backgroundColor: isTransitioning ? '#FFD700' : '#00FF00',
+            animation: isTransitioning ? 'pulse 1s infinite' : 'none',
+            '@keyframes pulse': {
+              '0%': { opacity: 1 },
+              '50%': { opacity: 0.5 },
+              '100%': { opacity: 1 },
+            },
+          }}
+        />
+        <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}>
+          {isTransitioning ? 'CHANGING...' : `NEXT IN ${Math.floor(timeUntilNext / 60)}:${(timeUntilNext % 60).toString().padStart(2, '0')}`}
         </Typography>
       </Box>
 
@@ -234,7 +324,7 @@ const FeaturedBanner = ({ onError }: FeaturedBannerProps) => {
           </Button>
         </Box>
 
-        <Box sx={{ mt: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Box sx={{ mt: 3, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
           <Typography 
             variant="body2" 
             sx={{ 
@@ -251,16 +341,40 @@ const FeaturedBanner = ({ onError }: FeaturedBannerProps) => {
             18+ ADULTS ONLY
           </Typography>
           
-          <Typography 
-            variant="body2" 
-            sx={{ 
-              color: '#FF69B4',
-              fontWeight: 'bold',
-              fontSize: '1rem',
-            }}
-          >
-            ${featuredVideo.price.toFixed(2)}
-          </Typography>
+          {/* Enhanced price display */}
+          <Box sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            backgroundColor: 'rgba(255, 15, 80, 0.9)',
+            px: 2,
+            py: 1,
+            borderRadius: '8px',
+            border: '2px solid rgba(255, 255, 255, 0.3)',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
+          }}>
+            <Typography 
+              variant="h6" 
+              sx={{ 
+                color: 'white',
+                fontWeight: 'bold',
+                fontSize: '1.2rem',
+                textShadow: '1px 1px 2px rgba(0,0,0,0.5)'
+              }}
+            >
+              ${featuredVideo.price.toFixed(2)}
+            </Typography>
+            <Typography 
+              variant="caption" 
+              sx={{ 
+                color: 'rgba(255, 255, 255, 0.8)',
+                fontWeight: 'bold',
+                fontSize: '0.8rem'
+              }}
+            >
+              ONE-TIME
+            </Typography>
+          </Box>
           
           <Typography 
             variant="body2" 

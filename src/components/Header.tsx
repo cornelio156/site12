@@ -1,6 +1,6 @@
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
 import type { FC } from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { ThemeContext } from '../context/ThemeContext';
 import { useAuth } from '../services/Auth';
 import { useSiteConfig } from '../context/SiteConfigContext';
@@ -10,16 +10,25 @@ import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Box from '@mui/material/Box';
+import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
+import SearchIcon from '@mui/icons-material/Search';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonIcon from '@mui/icons-material/Person';
-import Chip from '@mui/material/Chip';
+import { Chip } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
 const Header: FC = () => {
   const { mode, toggleTheme } = useContext(ThemeContext);
   const { user, logout, isAuthenticated } = useAuth();
   const { siteName } = useSiteConfig();
+  const navigate = useNavigate();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const [searchQuery, setSearchQuery] = useState('');
 
   const handleLogout = async () => {
     try {
@@ -30,6 +39,17 @@ const Header: FC = () => {
       localStorage.removeItem('sessionToken');
       window.location.reload();
     }
+  };
+
+  const handleSearch = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (searchQuery.trim()) {
+      navigate(`/videos?search=${encodeURIComponent(searchQuery.trim())}`);
+    }
+  };
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(event.target.value);
   };
 
   // Only show admin/logout if authenticated
@@ -107,6 +127,66 @@ const Header: FC = () => {
           />
         </Box>
         
+        {/* Search Bar */}
+        {!isMobile && (
+          <Box 
+            component="form" 
+            onSubmit={handleSearch}
+            sx={{ 
+              display: 'flex', 
+              alignItems: 'center',
+              mx: 1,
+              minWidth: '200px',
+              maxWidth: '250px'
+            }}
+          >
+            <TextField
+              placeholder="Search..."
+              size="small"
+              value={searchQuery}
+              onChange={handleSearchChange}
+              sx={{ 
+                flexGrow: 1,
+                '& .MuiOutlinedInput-root': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                  color: '#fff',
+                  height: '36px',
+                  fontSize: '0.85rem',
+                  '& fieldset': {
+                    borderColor: 'rgba(255, 255, 255, 0.2)',
+                    borderWidth: '1px',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: 'rgba(255, 15, 80, 0.4)',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: '#FF0F50',
+                    borderWidth: '1px',
+                  },
+                },
+                '& .MuiInputBase-input': {
+                  padding: '8px 12px',
+                  '&::placeholder': {
+                    color: 'rgba(255, 255, 255, 0.6)',
+                    opacity: 1,
+                    fontSize: '0.85rem',
+                  },
+                },
+              }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start" sx={{ ml: 1 }}>
+                    <SearchIcon sx={{ 
+                      color: 'rgba(255, 255, 255, 0.6)', 
+                      fontSize: '18px' 
+                    }} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Box>
+        )}
+
         {/* Navigation */}
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Button 
@@ -140,6 +220,24 @@ const Header: FC = () => {
           >
             Videos
           </Button>
+          
+          {/* Mobile Search Icon */}
+          {isMobile && (
+            <IconButton 
+              color="inherit" 
+              onClick={() => navigate('/videos')}
+              sx={{ 
+                mr: 1,
+                color: '#fff',
+                '&:hover': {
+                  bgcolor: 'rgba(255, 15, 80, 0.1)'
+                }
+              }}
+              aria-label="search"
+            >
+              <SearchIcon />
+            </IconButton>
+          )}
           
           {/* Show admin button if authenticated */}
           {showAdminControls && (
