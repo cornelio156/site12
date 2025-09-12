@@ -1,5 +1,6 @@
 import { databases, databaseId, videoCollectionId, storage, videosBucketId, thumbnailsBucketId } from './node_appwrite';
 import { Query, ID } from 'appwrite';
+import { CryptoService } from './CryptoService';
 
 // Video interface
 export interface Video {
@@ -65,22 +66,25 @@ export class VideoService {
       }
     }
     
+    // Descriptografar dados sensíveis
+    const decryptedVideo = CryptoService.decryptVideoData(video);
+    
     // Garantir consistência nos campos - mapeando do esquema do banco para o formato esperado pelo frontend
     return {
-      $id: video.$id,
-      title: video.title || 'Untitled',
-      description: video.description || '',
-      price: typeof video.price === 'number' ? video.price : parseFloat(video.price || '0'),
-      duration: video.duration ? formattedDuration : '00:00', // Converter de inteiro para string formatada
-      videoFileId: video.video_id || null, // Mapear video_id para videoFileId no frontend
-      video_id: video.video_id || null, // Manter video_id para compatibilidade interna
-      thumbnailFileId: video.thumbnail_id || null, // Mapear thumbnail_id para thumbnailFileId no frontend
-      thumbnail_id: video.thumbnail_id || null, // Manter thumbnail_id para compatibilidade interna
-      thumbnailUrl: video.thumbnailUrl || null,
-      isPurchased: video.isPurchased || false,
-      createdAt: video.created_at || new Date().toISOString(), // Mapear created_at para createdAt no frontend
-      views: typeof video.views === 'number' ? video.views : 0,
-      product_link: video.product_link || ''
+      $id: decryptedVideo.$id,
+      title: decryptedVideo.title || 'Untitled',
+      description: decryptedVideo.description || '',
+      price: typeof decryptedVideo.price === 'number' ? decryptedVideo.price : parseFloat(decryptedVideo.price || '0'),
+      duration: decryptedVideo.duration ? formattedDuration : '00:00', // Converter de inteiro para string formatada
+      videoFileId: decryptedVideo.video_id || null, // Mapear video_id para videoFileId no frontend
+      video_id: decryptedVideo.video_id || null, // Manter video_id para compatibilidade interna
+      thumbnailFileId: decryptedVideo.thumbnail_id || null, // Mapear thumbnail_id para thumbnailFileId no frontend
+      thumbnail_id: decryptedVideo.thumbnail_id || null, // Manter thumbnail_id para compatibilidade interna
+      thumbnailUrl: decryptedVideo.thumbnailUrl || null,
+      isPurchased: decryptedVideo.isPurchased || false,
+      createdAt: decryptedVideo.created_at || new Date().toISOString(), // Mapear created_at para createdAt no frontend
+      views: typeof decryptedVideo.views === 'number' ? decryptedVideo.views : 0,
+      product_link: decryptedVideo.product_link || ''
     };
   }
 
@@ -160,7 +164,12 @@ export class VideoService {
         
         if (thumbnailId) {
           try {
-            const thumbnailUrl = await storage.getFileView(thumbnailsBucketId, thumbnailId);
+            // Descriptografar o ID da miniatura se estiver criptografado
+            const decryptedThumbnailId = CryptoService.isEncrypted(thumbnailId) 
+              ? CryptoService.decryptFileId(thumbnailId) 
+              : thumbnailId;
+            
+            const thumbnailUrl = await storage.getFileView(thumbnailsBucketId, decryptedThumbnailId);
             video.thumbnailUrl = thumbnailUrl.href;
           } catch (error) {
             console.error(`Erro ao obter miniatura para o vídeo ${video.$id}:`, error);
@@ -234,7 +243,12 @@ export class VideoService {
       
       if (thumbnailId) {
         try {
-          const thumbnailUrl = await storage.getFileView(thumbnailsBucketId, thumbnailId);
+          // Descriptografar o ID da miniatura se estiver criptografado
+          const decryptedThumbnailId = CryptoService.isEncrypted(thumbnailId) 
+            ? CryptoService.decryptFileId(thumbnailId) 
+            : thumbnailId;
+            
+          const thumbnailUrl = await storage.getFileView(thumbnailsBucketId, decryptedThumbnailId);
           video.thumbnailUrl = thumbnailUrl.href;
         } catch (error) {
           console.error(`Error getting thumbnail for video ${video.$id}:`, error);
@@ -330,16 +344,21 @@ export class VideoService {
         return null;
       }
       
-      console.log(`Attempting to get file URL for video ID: ${videoFileId} from bucket: ${videosBucketId}`);
+      // Descriptografar o ID do arquivo se estiver criptografado
+      const decryptedFileId = CryptoService.isEncrypted(videoFileId) 
+        ? CryptoService.decryptFileId(videoFileId) 
+        : videoFileId;
+      
+      console.log(`Attempting to get file URL for video ID: ${decryptedFileId} from bucket: ${videosBucketId}`);
       
       // Get video file URL - não verificamos mais o status de compra
       try {
-        const fileUrl = await storage.getFileView(videosBucketId, videoFileId);
+        const fileUrl = await storage.getFileView(videosBucketId, decryptedFileId);
         console.log(`Video URL obtained: ${fileUrl.href}`);
         return fileUrl.href;
       } catch (error) {
         console.error(`Error getting file URL:`, error);
-        console.error(`Bucket ID: ${videosBucketId}, Video File ID: ${videoFileId}`);
+        console.error(`Bucket ID: ${videosBucketId}, Video File ID: ${decryptedFileId}`);
         return null;
       }
     } catch (error) {

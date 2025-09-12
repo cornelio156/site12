@@ -6,6 +6,7 @@ interface SiteConfig {
   $id: string;
   site_name: string;
   paypal_client_id: string;
+  paypal_me_username?: string; // For PayPal.me integration
   stripe_publishable_key: string;
   stripe_secret_key: string;
   telegram_username: string;
@@ -23,6 +24,7 @@ interface SiteConfig {
 interface SiteConfigContextType {
   siteName: string;
   paypalClientId: string;
+  paypalMeUsername: string; // For PayPal.me integration
   stripePublishableKey: string;
   stripeSecretKey: string;
   telegramUsername: string;
@@ -44,6 +46,7 @@ interface SiteConfigContextType {
 const SiteConfigContext = createContext<SiteConfigContextType>({
   siteName: 'VideosPlus',
   paypalClientId: '',
+  paypalMeUsername: '',
   stripePublishableKey: '',
   stripeSecretKey: '',
   telegramUsername: '',
@@ -99,6 +102,7 @@ export const SiteConfigProvider = ({ children }: { children: ReactNode }) => {
   const value = {
     siteName: config?.site_name || 'VideosPlus',
     paypalClientId: config?.paypal_client_id || '',
+    paypalMeUsername: config?.paypal_me_username || '',
     stripePublishableKey: config?.stripe_publishable_key || '',
     stripeSecretKey: config?.stripe_secret_key || '',
     telegramUsername: config?.telegram_username || '',

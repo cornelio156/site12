@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../services/Auth';
 import { VideoService } from '../services/VideoService';
 import { AppwriteSchemaManager } from '../services/AppwriteSchemaManager';
-import { ID } from 'appwrite';
+import { CryptoService } from '../services/CryptoService';
+import { ID, Permission, Role } from 'appwrite';
 import { useSiteConfig } from '../context/SiteConfigContext';
 import { databases, databaseId, storage, videoCollectionId, siteConfigCollectionId, userCollectionId, videosBucketId, thumbnailsBucketId } from '../services/node_appwrite';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -134,6 +135,7 @@ interface SiteConfig {
   $id: string;
   site_name: string;
   paypal_client_id: string;
+  paypal_me_username?: string;
   stripe_publishable_key: string;
   stripe_secret_key: string;
   telegram_username: string;
@@ -181,6 +183,7 @@ const Admin: FC = () => {
   const [siteConfig, setSiteConfig] = useState<SiteConfig | null>(null);
   const [siteName, setSiteName] = useState('');
   const [paypalClientId, setPaypalClientId] = useState('');
+  const [paypalMeUsername, setPaypalMeUsername] = useState('');
   const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [stripeSecretKey, setStripeSecretKey] = useState('');
   const [telegramUsername, setTelegramUsername] = useState('');
@@ -326,6 +329,7 @@ const Admin: FC = () => {
         setSiteConfig(config);
         setSiteName(config.site_name);
         setPaypalClientId(config.paypal_client_id);
+        setPaypalMeUsername(config.paypal_me_username || '');
         setStripePublishableKey(config.stripe_publishable_key || '');
         setStripeSecretKey(config.stripe_secret_key || '');
         setTelegramUsername(config.telegram_username);
@@ -413,6 +417,15 @@ const Admin: FC = () => {
     setEditingVideo(null);
   };
   
+  // Helper function to create encrypted file name
+  const createEncryptedFileName = (originalFileName: string, fileType: 'video' | 'thumbnail'): string => {
+    const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const encryptedName = CryptoService.encryptFileName(originalFileName);
+    const extension = originalFileName.split('.').pop() || '';
+    return `${fileType}_${timestamp}_${randomSuffix}_${encryptedName}.${extension}`;
+  };
+
   // Upload video and thumbnail
   const handleVideoUpload = async () => {
     if (!videoTitle || !videoDescription || !videoPrice || !productLink) {
@@ -456,11 +469,16 @@ const Admin: FC = () => {
             }
           }
           
-          // Upload new thumbnail
+          // Create encrypted file name for thumbnail
+          const encryptedThumbnailName = createEncryptedFileName(thumbnailFile.name, 'thumbnail');
+          
+          // Upload new thumbnail with encrypted name
           const thumbnailUpload = await storage.createFile(
             thumbnailsBucketId,
             ID.unique(),
-            thumbnailFile
+            thumbnailFile,
+            [Permission.read(Role.any())],
+            encryptedThumbnailName
           );
           thumbnailId = thumbnailUpload.$id;
         }
@@ -476,11 +494,16 @@ const Admin: FC = () => {
             }
           }
           
-          // Upload new video
+          // Create encrypted file name for video
+          const encryptedVideoName = createEncryptedFileName(videoFile.name, 'video');
+          
+          // Upload new video with encrypted name
           const videoUpload = await storage.createFile(
             videosBucketId,
             ID.unique(),
-            videoFile
+            videoFile,
+            [Permission.read(Role.any())],
+            encryptedVideoName
           );
           videoId = videoUpload.$id;
         }
@@ -489,12 +512,12 @@ const Admin: FC = () => {
           // Primeiro tente com todos os campos obrigatórios
           // Para edição, vamos preservar valores existentes quando não fornecidos
           const requiredFields = {
-            title: videoTitle,
-            description: videoDescription,
+            title: CryptoService.encryptVideoTitle(videoTitle),
+            description: CryptoService.encryptVideoDescription(videoDescription),
             price: parseFloat(videoPrice),
-            product_link: productLink,
-            video_id: videoId || existingVideo.video_id,
-            thumbnail_id: thumbnailId || existingVideo.thumbnail_id
+            product_link: CryptoService.encryptProductLink(productLink),
+            video_id: videoId ? CryptoService.encryptFileId(videoId) : existingVideo.video_id,
+            thumbnail_id: thumbnailId ? CryptoService.encryptFileId(thumbnailId) : existingVideo.thumbnail_id
           };
           
           await databases.updateDocument(
@@ -544,18 +567,26 @@ const Admin: FC = () => {
           return;
         }
       } else {
-        // Upload thumbnail
+        // Create encrypted file names
+        const encryptedThumbnailName = createEncryptedFileName(thumbnailFile!.name, 'thumbnail');
+        const encryptedVideoName = createEncryptedFileName(videoFile!.name, 'video');
+        
+        // Upload thumbnail with encrypted name
         const thumbnailUpload = await storage.createFile(
           thumbnailsBucketId,
           ID.unique(),
-          thumbnailFile!
+          thumbnailFile!,
+          [Permission.read(Role.any())],
+          encryptedThumbnailName
         );
         
-        // Upload video
+        // Upload video with encrypted name
         const videoUpload = await storage.createFile(
           videosBucketId,
           ID.unique(),
-          videoFile!
+          videoFile!,
+          [Permission.read(Role.any())],
+          encryptedVideoName
         );
         
         try {
@@ -566,12 +597,12 @@ const Admin: FC = () => {
             videoCollectionId,
             ID.unique(),
             {
-              title: videoTitle,
-              description: videoDescription,
+              title: CryptoService.encryptVideoTitle(videoTitle),
+              description: CryptoService.encryptVideoDescription(videoDescription),
               price: parseFloat(videoPrice),
-              product_link: productLink,
-              video_id: videoUpload.$id,        // Campo obrigatório
-              thumbnail_id: thumbnailUpload.$id, // Campo obrigatório
+              product_link: CryptoService.encryptProductLink(productLink),
+              video_id: CryptoService.encryptFileId(videoUpload.$id),        // Campo obrigatório
+              thumbnail_id: CryptoService.encryptFileId(thumbnailUpload.$id), // Campo obrigatório
               created_at: new Date().toISOString(), // Campo obrigatório
               is_active: true                    // Campo obrigatório
             }
@@ -664,13 +695,47 @@ const Admin: FC = () => {
         id
       ) as unknown as Video;
       
-      // Delete video and thumbnail files if they exist
+      // Decrypt file IDs before using them for deletion
+      let decryptedVideoId = '';
+      let decryptedThumbnailId = '';
+      
       if (video.video_id) {
-        await storage.deleteFile(videosBucketId, video.video_id);
+        try {
+          decryptedVideoId = CryptoService.decryptFileId(video.video_id);
+        } catch (err) {
+          console.error('Error decrypting video_id:', err);
+          // If decryption fails, try using the original value (might be unencrypted)
+          decryptedVideoId = video.video_id;
+        }
       }
       
       if (video.thumbnail_id) {
-        await storage.deleteFile(thumbnailsBucketId, video.thumbnail_id);
+        try {
+          decryptedThumbnailId = CryptoService.decryptFileId(video.thumbnail_id);
+        } catch (err) {
+          console.error('Error decrypting thumbnail_id:', err);
+          // If decryption fails, try using the original value (might be unencrypted)
+          decryptedThumbnailId = video.thumbnail_id;
+        }
+      }
+      
+      // Delete video and thumbnail files if they exist
+      if (decryptedVideoId) {
+        try {
+          await storage.deleteFile(videosBucketId, decryptedVideoId);
+        } catch (err) {
+          console.error('Error deleting video file:', err);
+          // Continue even if file deletion fails
+        }
+      }
+      
+      if (decryptedThumbnailId) {
+        try {
+          await storage.deleteFile(thumbnailsBucketId, decryptedThumbnailId);
+        } catch (err) {
+          console.error('Error deleting thumbnail file:', err);
+          // Continue even if file deletion fails
+        }
       }
       
       // Delete video document
@@ -846,6 +911,7 @@ const Admin: FC = () => {
         const fieldsToTry = [
           { name: 'site_name', value: siteName },
           { name: 'paypal_client_id', value: paypalClientId },
+          { name: 'paypal_me_username', value: paypalMeUsername },
           { name: 'stripe_publishable_key', value: stripePublishableKey },
           { name: 'stripe_secret_key', value: stripeSecretKey },
           { name: 'telegram_username', value: telegramUsername },
@@ -1425,6 +1491,16 @@ const Admin: FC = () => {
                     label="PayPal Client ID"
                     value={paypalClientId}
                     onChange={(e) => setPaypalClientId(e.target.value)}
+                    helperText="For traditional PayPal integration (starts with 'A')"
+                  />
+                  
+                  <TextField
+                    fullWidth
+                    margin="normal"
+                    label="PayPal.me Username"
+                    value={paypalMeUsername}
+                    onChange={(e) => setPaypalMeUsername(e.target.value)}
+                    helperText="Your PayPal.me username (e.g., 'yourusername' for paypal.me/yourusername)"
                   />
                   
                   <TextField

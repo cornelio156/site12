@@ -23,20 +23,44 @@ dotenv.config();
 
 const app = express();
 const defaultPort = 3000;
-let port = process.env.PORT || defaultPort;
+// Use Render's PORT environment variable, fallback to 3000 for local development
+let port = process.env.PORT ? parseInt(process.env.PORT, 10) : defaultPort;
 
 // Middlewares
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+
+// Add request timeout middleware
+app.use((req, res, next) => {
+  req.setTimeout(120000); // 2 minutes
+  res.setTimeout(120000); // 2 minutes
+  next();
+});
 
 // Servir arquivos estáticos da pasta dist (para produção)
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'dist')));
 }
 
-// Rota principal para verificar se o servidor está rodando
+// Health check endpoint for Render
 app.get('/api', (req, res) => {
-  res.send('API local rodando! Endpoints disponíveis:\n- /api/setup (teste de conexão Appwrite)\n- /api/create-checkout-session (sessões de checkout Stripe)');
+  res.json({ 
+    status: 'ok', 
+    message: 'API rodando!', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Additional health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Endpoint para setup da base de dados Appwrite
@@ -371,10 +395,25 @@ app.post('/api/create-checkout-session', async (req, res) => {
     let stripeSecretKey = '';
     
     // Inicializar cliente Appwrite com variáveis de ambiente
+    const projectId = process.env.VITE_APPWRITE_PROJECT_ID;
+    const apiKey = process.env.VITE_APPWRITE_API_KEY;
+    
+    console.log('Appwrite config:', { 
+      projectId: projectId ? 'Set' : 'Missing', 
+      apiKey: apiKey ? 'Set' : 'Missing' 
+    });
+    
+    if (!projectId || !apiKey) {
+      return res.status(500).json({ 
+        error: 'Appwrite credentials not configured',
+        details: 'VITE_APPWRITE_PROJECT_ID and VITE_APPWRITE_API_KEY must be set'
+      });
+    }
+    
     const client = new Client()
       .setEndpoint('https://fra.cloud.appwrite.io/v1') // Endpoint fixo
-      .setProject(process.env.VITE_APPWRITE_PROJECT_ID)
-      .setKey(process.env.VITE_APPWRITE_API_KEY);
+      .setProject(projectId)
+      .setKey(apiKey);
       
     const databases = new Databases(client);
     
@@ -387,15 +426,24 @@ app.post('/api/create-checkout-session', async (req, res) => {
         'site_config'    // Site Config Collection ID consistente
       );
       
+      console.log('Appwrite response:', { 
+        total: response.total, 
+        documents: response.documents.length 
+      });
+      
       if (response.documents.length > 0) {
         const config = response.documents[0];
         stripeSecretKey = config.stripe_secret_key;
-        console.log('Chave secreta do Stripe obtida com sucesso do Appwrite');
+        console.log('Chave secreta do Stripe obtida:', stripeSecretKey ? 'Yes' : 'No');
       } else {
         console.log('Nenhum documento de configuração encontrado no Appwrite');
       }
     } catch (appwriteError) {
       console.error('Erro ao buscar chave do Stripe no Appwrite:', appwriteError);
+      return res.status(500).json({ 
+        error: 'Failed to fetch Stripe credentials from Appwrite',
+        details: appwriteError.message
+      });
     }
     
     // Fallback para variável de ambiente se não encontrar no Appwrite
@@ -404,13 +452,16 @@ app.post('/api/create-checkout-session', async (req, res) => {
       if (stripeSecretKey) {
         console.log('Usando chave do Stripe da variável de ambiente como fallback');
       } else {
+        console.error('Stripe secret key not found in Appwrite or environment variables');
         return res.status(500).json({ 
-          error: 'Chave secreta do Stripe não encontrada nem no Appwrite nem nas variáveis de ambiente' 
+          error: 'Stripe secret key not found',
+          details: 'Configure stripe_secret_key in Appwrite site_config or set STRIPE_SECRET_KEY environment variable'
         });
       }
     }
     
     // Inicializar Stripe com a chave obtida do Appwrite
+    console.log('Inicializando Stripe...');
     const stripe = new Stripe(stripeSecretKey);
     
     const { amount, currency = 'usd', name, success_url, cancel_url } = req.body;
@@ -446,6 +497,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
     console.log('Line items criados:', JSON.stringify(lineItems, null, 2));
 
     // Criar sessão de checkout
+    console.log('Criando sessão de checkout no Stripe...');
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: lineItems,
@@ -455,6 +507,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
       billing_address_collection: 'auto',
     });
     
+    console.log('Sessão criada com sucesso:', session.id);
     res.json({ sessionId: session.id, url: session.url });
   } catch (error) {
     console.error('Erro ao criar sessão de checkout:', error);
@@ -476,9 +529,16 @@ if (process.env.NODE_ENV === 'production') {
 function startServer(targetPort) {
   const server = http.createServer(app);
   
-  server.listen(targetPort, () => {
-    console.log(`🚀 Servidor rodando na porta ${targetPort}`);
-    console.log(`📱 Acesse: http://localhost:${targetPort}`);
+  // Configure timeouts for Render deployment
+  server.keepAliveTimeout = 120000; // 2 minutes
+  server.headersTimeout = 120000;   // 2 minutes
+  
+  // Bind to 0.0.0.0 for Render deployment (required for external access)
+  const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
+  
+  server.listen(targetPort, host, () => {
+    console.log(`🚀 Servidor rodando na porta ${targetPort} no host ${host}`);
+    console.log(`📱 Acesse: http://${host}:${targetPort}`);
     console.log('💳 API Stripe configurada e pronta para uso!');
     console.log('📄 Use /api/create-checkout-session para criar sessões de checkout Stripe.');
     console.log('🔧 API de setup Appwrite configurada!');
@@ -486,7 +546,7 @@ function startServer(targetPort) {
     
     if (port !== 3000) {
       console.log(`ATENÇÃO: A API está rodando na porta ${port} em vez da porta padrão 3000.`);
-      console.log(`Se você configurou sua aplicação para usar http://localhost:3000, atualize para http://localhost:${port}`);
+      console.log(`Se você configurou sua aplicação para usar http://localhost:3000, atualize para http://${host}:${port}`);
     }
   });
 
@@ -500,6 +560,28 @@ function startServer(targetPort) {
     }
   });
 }
+
+// Process error handlers
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  process.exit(0);
+});
 
 // Iniciar servidor
 if (process.env.NODE_ENV !== 'test') {

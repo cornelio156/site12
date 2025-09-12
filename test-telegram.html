@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste Telegram - Stripe</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-button {
+            background: #635bff;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px;
+        }
+        .test-button:hover {
+            background: #4b45c6;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Teste de Notificação Telegram - Stripe</h1>
+        <p>Este teste verifica se as notificações do Stripe estão funcionando corretamente via Telegram.</p>
+        
+        <button class="test-button" onclick="testTelegramConnection()">
+            🔗 Testar Conexão
+        </button>
+        
+        <button class="test-button" onclick="testStripeNotification()">
+            💳 Testar Notificação Stripe
+        </button>
+        
+        <button class="test-button" onclick="testPayPalNotification()">
+            🅿️ Testar Notificação PayPal
+        </button>
+        
+        <div id="result"></div>
+        
+        <div style="margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+            <h3>📋 Instruções:</h3>
+            <ol>
+                <li>Clique em "Testar Conexão" para verificar se o bot está funcionando</li>
+                <li>Clique em "Testar Notificação Stripe" para enviar uma notificação de teste</li>
+                <li>Verifique seu Telegram para ver as notificações</li>
+                <li>As notificações devem aparecer no chat configurado no bot</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Simulação das funções do TelegramService para teste
+        const TELEGRAM_CONFIG = {
+            BOT_TOKEN: '8216788918:AAG-0M8I-nkKDxB8DtWh2_GjS_GMqbMWBIU',
+            CHAT_ID: '7854949857',
+            API_URL: 'https://api.telegram.org/bot'
+        };
+
+        async function testTelegramConnection() {
+            showResult('🔄 Testando conexão com Telegram...', 'info');
+            
+            try {
+                const response = await fetch(`${TELEGRAM_CONFIG.API_URL}${TELEGRAM_CONFIG.BOT_TOKEN}/getMe`);
+                const data = await response.json();
+                
+                if (data.ok) {
+                    showResult(`✅ Bot conectado com sucesso!<br>Nome: ${data.result.first_name}<br>Username: @${data.result.username}`, 'success');
+                } else {
+                    showResult(`❌ Erro na conexão: ${data.description}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Erro ao conectar: ${error.message}`, 'error');
+            }
+        }
+
+        async function testStripeNotification() {
+            showResult('🔄 Enviando notificação de teste do Stripe...', 'info');
+            
+            try {
+                const message = `
+🛒 <b>NOVA VENDA REALIZADA!</b> 💳
+
+📹 <b>Vídeo:</b> Vídeo de Teste - Stripe
+💰 <b>Valor:</b> $29.99
+💳 <b>Método:</b> Stripe (Apple Pay, Amazon Pay, Visa, Mastercard)
+🆔 <b>Transação:</b> <code>cs_test_123456789</code>
+⏰ <b>Data:</b> ${new Date().toLocaleString('pt-BR')}
+
+👤 <b>Email:</b> teste@email.com
+👤 <b>Nome:</b> Usuário Teste
+
+✅ <b>Status:</b> Pagamento confirmado
+                `.trim();
+
+                const response = await fetch(`${TELEGRAM_CONFIG.API_URL}${TELEGRAM_CONFIG.BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        chat_id: TELEGRAM_CONFIG.CHAT_ID,
+                        text: message,
+                        parse_mode: 'HTML',
+                        disable_web_page_preview: true
+                    })
+                });
+
+                if (response.ok) {
+                    showResult('✅ Notificação Stripe enviada com sucesso!<br>📱 Verifique seu Telegram!', 'success');
+                } else {
+                    const errorData = await response.json();
+                    showResult(`❌ Erro ao enviar notificação: ${errorData.description}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Erro: ${error.message}`, 'error');
+            }
+        }
+
+        async function testPayPalNotification() {
+            showResult('🔄 Enviando notificação de teste do PayPal...', 'info');
+            
+            try {
+                const message = `
+🛒 <b>NOVA VENDA REALIZADA!</b> 💳
+
+📹 <b>Vídeo:</b> Vídeo de Teste - PayPal
+💰 <b>Valor:</b> $29.99
+💳 <b>Método:</b> PayPal
+🆔 <b>Transação:</b> <code>paypal_test_123456789</code>
+⏰ <b>Data:</b> ${new Date().toLocaleString('pt-BR')}
+
+👤 <b>Email:</b> teste@email.com
+👤 <b>Nome:</b> Usuário Teste
+
+✅ <b>Status:</b> Pagamento confirmado
+                `.trim();
+
+                const response = await fetch(`${TELEGRAM_CONFIG.API_URL}${TELEGRAM_CONFIG.BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        chat_id: TELEGRAM_CONFIG.CHAT_ID,
+                        text: message,
+                        parse_mode: 'HTML',
+                        disable_web_page_preview: true
+                    })
+                });
+
+                if (response.ok) {
+                    showResult('✅ Notificação PayPal enviada com sucesso!<br>📱 Verifique seu Telegram!', 'success');
+                } else {
+                    const errorData = await response.json();
+                    showResult(`❌ Erro ao enviar notificação: ${errorData.description}`, 'error');
+                }
+            } catch (error) {
+                showResult(`❌ Erro: ${error.message}`, 'error');
+            }
+        }
+
+        function showResult(message, type) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = message;
+            resultDiv.className = `result ${type}`;
+        }
+    </script>
+</body>
+</html>

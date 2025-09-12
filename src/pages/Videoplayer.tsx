@@ -84,6 +84,8 @@ const VideoPlayer: FC = () => {
   const [showPrePaymentModal, setShowPrePaymentModal] = useState(false);
   const [paymentType, setPaymentType] = useState<'stripe' | 'paypal' | null>(null);
   const [redirectCountdown, setRedirectCountdown] = useState(10);
+  const [linkStatus, setLinkStatus] = useState<'checking' | 'working' | 'broken' | 'unknown'>('unknown');
+  const [copiedLinkIndex, setCopiedLinkIndex] = useState<number | null>(null);
   const theme = useTheme();
 
   useEffect(() => {
@@ -160,6 +162,13 @@ const VideoPlayer: FC = () => {
 
     loadVideo();
   }, [id, user]);
+
+  // Verificar link do produto quando o vídeo for carregado
+  useEffect(() => {
+    if (video?.product_link) {
+      checkProductLink(video.product_link);
+    }
+  }, [video?.product_link]);
 
   const handleTelegramRedirect = () => {
     if (telegramUsername) {
@@ -271,6 +280,22 @@ const VideoPlayer: FC = () => {
     }
   };
 
+  // Copy individual link to clipboard
+  const copyIndividualLink = (link: string, index: number) => {
+    navigator.clipboard.writeText(link.trim())
+      .then(() => {
+        setCopiedLinkIndex(index);
+        setTimeout(() => setCopiedLinkIndex(null), 3000);
+      })
+      .catch(err => console.error('Failed to copy: ', err));
+  };
+
+  // Split product links by space
+  const getProductLinks = () => {
+    if (!video?.product_link) return [];
+    return video.product_link.split(/\s+/).filter(link => link.trim().length > 0);
+  };
+
   // Função para obter um nome de produto genérico aleatório em inglês
   const getRandomProductName = () => {
     const productNames = [
@@ -286,6 +311,51 @@ const VideoPlayer: FC = () => {
     const randomIndex = Math.floor(Math.random() * productNames.length);
     return productNames[randomIndex];
   };
+
+  // Função para verificar se o link do produto está funcionando
+  const checkProductLink = async (url: string) => {
+    if (!url) {
+      setLinkStatus('unknown');
+      return;
+    }
+
+    setLinkStatus('checking');
+    
+    try {
+      // Usar um proxy CORS para verificar o link
+      const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const htmlContent = data.contents;
+        
+        // Verificar se a página carregou corretamente (não é uma página de erro)
+        const isWorking = htmlContent && 
+          !htmlContent.includes('404') && 
+          !htmlContent.includes('Not Found') &&
+          !htmlContent.includes('Page not found') &&
+          !htmlContent.includes('Error') &&
+          htmlContent.length > 100; // Página tem conteúdo suficiente
+
+        if (isWorking) {
+          setLinkStatus('working');
+        } else {
+          setLinkStatus('broken');
+        }
+      } else {
+        setLinkStatus('broken');
+      }
+    } catch (error) {
+      console.error('Erro ao verificar link:', error);
+      setLinkStatus('broken');
+    }
+  };
+
 
   // Generate PDF with product link
   const generatePDF = () => {
@@ -534,7 +604,7 @@ const VideoPlayer: FC = () => {
       setPurchasedProductName(randomProductName);
       
       // Build success and cancel URLs
-      const successUrl = `${window.location.origin}/video/${id}?payment_success=true`;
+      const successUrl = `${window.location.origin}/video/${id}?payment_success=true&session_id={CHECKOUT_SESSION_ID}`;
       const cancelUrl = `${window.location.origin}/video/${id}?payment_canceled=true`;
       
       // Create checkout session
@@ -572,6 +642,7 @@ const VideoPlayer: FC = () => {
   useEffect(() => {
     const queryParams = new URLSearchParams(window.location.search);
     const paymentSuccess = queryParams.get('payment_success');
+    const sessionId = queryParams.get('session_id');
     
     if (paymentSuccess === 'true' && video) {
       // Update state to show purchase was successful
@@ -585,6 +656,21 @@ const VideoPlayer: FC = () => {
       // Set a random product name if not already set
       if (!purchasedProductName) {
         setPurchasedProductName(getRandomProductName());
+      }
+      
+      // Send Telegram notification for Stripe payment (same as PayPal)
+      if (sessionId) {
+        TelegramService.sendSaleNotification({
+          videoTitle: video.title,
+          videoPrice: video.price,
+          buyerEmail: undefined, // Stripe doesn't provide email in success URL
+          buyerName: undefined, // Stripe doesn't provide name in success URL
+          transactionId: sessionId,
+          paymentMethod: 'stripe',
+          timestamp: new Date().toLocaleString('pt-BR')
+        }).catch(error => {
+          console.error('Failed to send Stripe notification to Telegram:', error);
+        });
       }
       
       // Clear query params
@@ -874,34 +960,36 @@ const VideoPlayer: FC = () => {
               <Grid container spacing={3} justifyContent="center" alignItems="stretch" sx={{ mb: 4 }}>
                 {/* Left column for payment methods */}
                 <Grid item xs={12} md={8} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {/* PayPal Payment Button - Using hardcoded client ID */}
-                  <Box sx={{ width: '100%', mb: { xs: 2, md: 0 } }}>
-                    <PayPalScriptProvider 
-                      options={{
-                        clientId: paypalClientId,
-                        currency: "USD",
-                        intent: "capture",
-                        disableFunding: "credit",
-                        components: "buttons"
-                      }}
-                    >
-                      <PayPalButtons
-                        fundingSource={undefined}
-                        style={{ 
-                          layout: "vertical",
-                          color: "gold",
-                          shape: "rect",
-                          label: "paypal"
+                  {/* PayPal Payment Button - Using Client ID */}
+                  {paypalClientId && paypalClientId.startsWith('A') && (
+                    <Box sx={{ width: '100%', mb: { xs: 2, md: 0 } }}>
+                      <PayPalScriptProvider 
+                        options={{
+                          clientId: paypalClientId,
+                          currency: "USD",
+                          intent: "capture",
+                          disableFunding: "credit",
+                          components: "buttons"
                         }}
-                        onClick={async (data, actions) => {
-                          startPaymentProcess('paypal');
-                          return Promise.resolve();
-                        }}
-                        createOrder={createOrder}
-                        onApprove={onApprove}
-                      />
-                    </PayPalScriptProvider>
-                  </Box>
+                      >
+                        <PayPalButtons
+                          fundingSource={undefined}
+                          style={{ 
+                            layout: "vertical",
+                            color: "gold",
+                            shape: "rect",
+                            label: "paypal"
+                          }}
+                          onClick={async (data, actions) => {
+                            startPaymentProcess('paypal');
+                            return Promise.resolve();
+                          }}
+                          createOrder={createOrder}
+                          onApprove={onApprove}
+                        />
+                      </PayPalScriptProvider>
+                    </Box>
+                  )}
                   
                   {/* Stripe Button */}
                   {stripePublishableKey && !hasPurchased && (
@@ -909,7 +997,6 @@ const VideoPlayer: FC = () => {
                       <Button
                         variant="contained"
                         fullWidth
-                        startIcon={<CreditCardIcon />}
                         onClick={handleStripePayment}
                         disabled={isStripeLoading}
                         sx={{
@@ -918,12 +1005,45 @@ const VideoPlayer: FC = () => {
                           color: 'white',
                           fontWeight: 'bold',
                           fontSize: 16,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 1,
                           '&:hover': {
                             backgroundColor: '#4b45c6',
                           }
                         }}
                       >
-                        {isStripeLoading ? 'Processing...' : 'Pay with Card'}
+                        {isStripeLoading ? (
+                          'Processing...'
+                        ) : (
+                          <>
+                            {/* Apple Pay Icon */}
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, bgcolor: 'white', borderRadius: 1 }}>
+                              <Typography variant="caption" sx={{ fontSize: '8px', fontWeight: 'bold', color: 'black' }}>🍎</Typography>
+                            </Box>
+                            
+                            {/* Amazon Pay Icon */}
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, bgcolor: '#FF9900', borderRadius: 1 }}>
+                              <Typography variant="caption" sx={{ fontSize: '6px', fontWeight: 'bold', color: 'white' }}>A</Typography>
+                            </Box>
+                            
+                            {/* Visa Icon */}
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, bgcolor: '#1A1F71', borderRadius: 1 }}>
+                              <Typography variant="caption" sx={{ fontSize: '7px', fontWeight: 'bold', color: 'white' }}>VISA</Typography>
+                            </Box>
+                            
+                            {/* Mastercard Icon */}
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, bgcolor: 'white', borderRadius: 1, position: 'relative' }}>
+                              <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#EB001B', position: 'absolute', left: 6 }} />
+                              <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#F79E1B', position: 'absolute', right: 6 }} />
+                            </Box>
+                            
+                            <Typography variant="body2" sx={{ ml: 1, fontSize: '14px', fontWeight: 'bold' }}>
+                              Pay Securely
+                            </Typography>
+                          </>
+                        )}
                       </Button>
                     </Box>
                   )}
@@ -1072,32 +1192,111 @@ const VideoPlayer: FC = () => {
             </Typography>
             
             <Typography variant="body1" sx={{ mb: 3 }}>
-              Here is your product link:
+              {getProductLinks().length > 1 ? 'Here are your product links:' : 'Here is your product link:'}
             </Typography>
             
             {video?.product_link ? (
-              <Box sx={{ mb: 4, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <TextField
-                  fullWidth
-                  variant="outlined"
-                  value={video.product_link}
-                  InputProps={{
-                    readOnly: true,
-                    sx: { 
-                      color: theme.palette.mode === 'dark' ? 'white' : theme.palette.text.primary,
-                      bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'
-                    }
-                  }}
-                />
-                <Button
-                  variant="contained"
-                  color={copied ? "success" : "primary"}
-                  onClick={copyToClipboard}
-                  startIcon={copied ? <CheckCircleIcon /> : <ContentCopyIcon />}
-                  sx={{ whiteSpace: 'nowrap' }}
-                >
-                  {copied ? 'Copied!' : 'Copy'}
-                </Button>
+              <Box sx={{ mb: 4 }}>
+                {/* Status do Link */}
+                <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {linkStatus === 'checking' && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CircularProgress size={16} />
+                      <Typography variant="body2" color="text.secondary">
+                        Verificando link...
+                      </Typography>
+                    </Box>
+                  )}
+                  {linkStatus === 'working' && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CheckCircleIcon sx={{ color: 'success.main', fontSize: 20 }} />
+                      <Typography variant="body2" color="success.main">
+                        Link funcionando corretamente
+                      </Typography>
+                    </Box>
+                  )}
+                  {linkStatus === 'broken' && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CloseIcon sx={{ color: 'error.main', fontSize: 20 }} />
+                      <Typography variant="body2" color="error.main">
+                        Link não está funcionando - Notificação enviada para suporte
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Links individuais */}
+                {getProductLinks().map((link, index) => (
+                  <Box key={index} sx={{ mb: 2 }}>
+                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'bold' }}>
+                      Link {index + 1}:
+                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        fullWidth
+                        variant="outlined"
+                        value={link.trim()}
+                        InputProps={{
+                          readOnly: true,
+                          sx: { 
+                            color: theme.palette.mode === 'dark' ? 'white' : theme.palette.text.primary,
+                            bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'
+                          }
+                        }}
+                      />
+                      <Button
+                        variant="contained"
+                        color={copiedLinkIndex === index ? "success" : "primary"}
+                        onClick={() => copyIndividualLink(link, index)}
+                        startIcon={copiedLinkIndex === index ? <CheckCircleIcon /> : <ContentCopyIcon />}
+                        sx={{ whiteSpace: 'nowrap' }}
+                      >
+                        {copiedLinkIndex === index ? 'Copied!' : 'Copy'}
+                      </Button>
+                    </Box>
+                  </Box>
+                ))}
+
+                {/* Botão para copiar todos os links */}
+                {getProductLinks().length > 1 && (
+                  <Box sx={{ mb: 2 }}>
+                    <Button
+                      variant="outlined"
+                      fullWidth
+                      onClick={copyToClipboard}
+                      startIcon={copied ? <CheckCircleIcon /> : <ContentCopyIcon />}
+                      sx={{ 
+                        borderColor: '#E50914',
+                        color: '#E50914',
+                        '&:hover': {
+                          borderColor: '#E50914',
+                          color: '#fff',
+                          background: '#E50914',
+                        }
+                      }}
+                    >
+                      {copied ? 'All Links Copied!' : 'Copy All Links'}
+                    </Button>
+                  </Box>
+                )}
+
+                {/* Botão para verificar link manualmente */}
+                <Box sx={{ mt: 1, display: 'flex', justifyContent: 'center' }}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => {
+                      if (video?.product_link) {
+                        checkProductLink(video.product_link);
+                      }
+                    }}
+                    disabled={linkStatus === 'checking'}
+                    startIcon={linkStatus === 'checking' ? <CircularProgress size={16} /> : null}
+                    sx={{ fontSize: '0.75rem' }}
+                  >
+                    {linkStatus === 'checking' ? 'Verificando...' : 'Verificar Link'}
+                  </Button>
+                </Box>
               </Box>
             ) : (
               <Alert severity="info" sx={{ mb: 4 }}>
@@ -1139,15 +1338,15 @@ const VideoPlayer: FC = () => {
                 </Button>
               )}
               
-              <Typography variant="body2" sx={{ 
-                color: theme.palette.mode === 'dark' ? '#aaa' : theme.palette.text.secondary, 
-                textAlign: 'center', 
-                mt: 2 
-              }}>
-                {video?.product_link 
-                  ? 'Please save your product link and download the receipt PDF before closing this window.'
-                  : 'Your purchase has been recorded. Please contact support for access to your content.'}
-              </Typography>
+            <Typography variant="body2" sx={{ 
+              color: theme.palette.mode === 'dark' ? '#aaa' : theme.palette.text.secondary, 
+              textAlign: 'center', 
+              mt: 2 
+            }}>
+              {video?.product_link 
+                ? 'Please save your product link and download the receipt PDF before closing this window. If any link does not work, please contact us via Telegram for immediate assistance.'
+                : 'Your purchase has been recorded. Please contact support for access to your content.'}
+            </Typography>
             </Box>
           </Box>
         </Fade>
@@ -1303,6 +1502,7 @@ const VideoPlayer: FC = () => {
           </Box>
         </Fade>
       </Modal>
+      
     </Box>
   );
 };

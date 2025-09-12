@@ -5,9 +5,12 @@ services:
     plan: free
     buildCommand: npm ci && npm run build
     startCommand: npm start
+    healthCheckPath: /api
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: 10000
       - key: VITE_APPWRITE_PROJECT_ID
         fromDatabase:
           name: appwrite

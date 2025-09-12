@@ -10,6 +10,7 @@ interface TelegramNotification {
   timestamp: string;
 }
 
+
 class TelegramService {
   private static readonly BOT_TOKEN = TELEGRAM_CONFIG.BOT_TOKEN;
   private static readonly CHAT_ID = TELEGRAM_CONFIG.CHAT_ID;
@@ -57,7 +58,7 @@ class TelegramService {
                   notification.paymentMethod === 'stripe' ? '💳' : '₿';
     
     const methodName = notification.paymentMethod === 'paypal' ? 'PayPal' :
-                      notification.paymentMethod === 'stripe' ? 'Stripe' : 'Crypto';
+                      notification.paymentMethod === 'stripe' ? 'Stripe (Apple Pay, Amazon Pay, Visa, Mastercard)' : 'Crypto';
 
     return `
 🛒 <b>NOVA VENDA REALIZADA!</b> ${emoji}
@@ -106,6 +107,9 @@ ${context ? `<b>Contexto:</b> ${context}` : ''}
       return false;
     }
   }
+
+
+
 
   /**
    * Testa a conexão com o bot
