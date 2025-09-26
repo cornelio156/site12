@@ -3,7 +3,7 @@ services:
     name: videosplus
     env: node
     plan: free
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci && npm run build:render
     startCommand: npm start
     healthCheckPath: /api
     envVars:
@@ -11,17 +11,16 @@ services:
         value: production
       - key: PORT
         value: 10000
-      - key: VITE_APPWRITE_PROJECT_ID
-        fromDatabase:
-          name: appwrite
-          property: projectId
-      - key: VITE_APPWRITE_API_KEY
-        fromDatabase:
-          name: appwrite
-          property: apiKey
-      - key: VITE_STRIPE_PUBLISHABLE_KEY
-        fromDatabase:
-          name: stripe
-          property: publishableKey
       - key: VITE_API_URL
         value: https://videosplus.onrender.com
+      # Wasabi Configuration (configure these in Render dashboard)
+      - key: VITE_WASABI_ACCESS_KEY
+        value: your_wasabi_access_key
+      - key: VITE_WASABI_SECRET_KEY
+        value: your_wasabi_secret_key
+      - key: VITE_WASABI_REGION
+        value: eu-central-2
+      - key: VITE_WASABI_BUCKET
+        value: your_bucket_name
+      - key: VITE_WASABI_ENDPOINT
+        value: https://s3.eu-central-2.wasabisys.com

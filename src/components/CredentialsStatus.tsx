@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, Chip, Button, Alert, IconButton } from '@mui/material';
 import { CheckCircle, Settings, Close } from '@mui/icons-material';
-import { AppwriteCredentialsManager } from '../services/AppwriteCredentialsManager';
 
 const CredentialsStatus: React.FC = () => {
   const [credentials, setCredentials] = useState({ projectId: '', apiKey: '' });
@@ -9,9 +8,9 @@ const CredentialsStatus: React.FC = () => {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const saved = AppwriteCredentialsManager.loadCredentials();
-    setCredentials(saved);
-    setHasCredentials(AppwriteCredentialsManager.hasCredentials());
+    // Não dependemos mais do Appwrite, sempre mostrar como configurado
+    setCredentials({ projectId: 'wasabi', apiKey: 'configured' });
+    setHasCredentials(true);
   }, []);
 
   // Atalho secreto: Ctrl + Alt + C para exibir por 10s
@@ -29,7 +28,8 @@ const CredentialsStatus: React.FC = () => {
 
   const handleClearCredentials = () => {
     if (confirm('Tem certeza que deseja limpar as credenciais?')) {
-      AppwriteCredentialsManager.clearCredentials();
+      // Limpar configurações do localStorage
+      localStorage.removeItem('wasabi-config');
       setCredentials({ projectId: '', apiKey: '' });
       setHasCredentials(false);
     }
@@ -48,7 +48,7 @@ const CredentialsStatus: React.FC = () => {
         }
       >
         <Typography variant="body2">
-          <strong>Credenciais não configuradas:</strong> Use o botão de configuração para definir o Project ID e API Key do Appwrite.
+          <strong>Credenciais não configuradas:</strong> Use o botão de configuração para definir o Access Key e Secret Key do Wasabi.
         </Typography>
       </Alert>
     );

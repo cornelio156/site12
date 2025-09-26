@@ -1,7 +1,7 @@
 import { createContext, useState, useContext, useEffect, ReactNode } from 'react';
-import { databases, databaseId, siteConfigCollectionId } from '../services/node_appwrite';
+import { jsonDatabaseService, SiteConfigData } from '../services/JSONDatabaseService';
 
-// Define the site config interface
+// Define the site config interface - mantém compatibilidade com o frontend
 interface SiteConfig {
   $id: string;
   site_name: string;
@@ -18,6 +18,13 @@ interface SiteConfig {
   email_user?: string;
   email_pass?: string;
   email_from?: string;
+  wasabi_config?: {
+    accessKey: string;
+    secretKey: string;
+    region: string;
+    bucket: string;
+    endpoint: string;
+  };
 }
 
 // Define the context interface
@@ -36,10 +43,18 @@ interface SiteConfigContextType {
   emailUser: string;
   emailPass: string;
   emailFrom: string;
+  wasabiConfig: {
+    accessKey: string;
+    secretKey: string;
+    region: string;
+    bucket: string;
+    endpoint: string;
+  };
   siteConfig: SiteConfig | null;
   loading: boolean;
   error: string | null;
   refreshConfig: () => Promise<void>;
+  updateConfig: (updates: Partial<SiteConfigData>) => Promise<void>;
 }
 
 // Create the context with default values
@@ -58,10 +73,18 @@ const SiteConfigContext = createContext<SiteConfigContextType>({
   emailUser: '',
   emailPass: '',
   emailFrom: '',
+  wasabiConfig: {
+    accessKey: '',
+    secretKey: '',
+    region: '',
+    bucket: '',
+    endpoint: ''
+  },
   siteConfig: null,
   loading: false,
   error: null,
   refreshConfig: async () => {},
+  updateConfig: async () => {},
 });
 
 // Provider component
@@ -70,24 +93,118 @@ export const SiteConfigProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Function to convert SiteConfigData to SiteConfig (compatibilidade)
+  const convertToSiteConfig = (data: SiteConfigData): SiteConfig => {
+    return {
+      $id: 'site-config', // ID fixo para compatibilidade
+      site_name: data.siteName,
+      paypal_client_id: data.paypalClientId,
+      paypal_me_username: data.paypalMeUsername,
+      stripe_publishable_key: data.stripePublishableKey,
+      stripe_secret_key: data.stripeSecretKey,
+      telegram_username: data.telegramUsername,
+      video_list_title: data.videoListTitle,
+      crypto: data.crypto,
+      email_host: data.emailHost,
+      email_port: data.emailPort,
+      email_secure: data.emailSecure,
+      email_user: data.emailUser,
+      email_pass: data.emailPass,
+      email_from: data.emailFrom,
+      wasabi_config: data.wasabiConfig
+    };
+  };
+
   // Function to fetch site configuration
   const fetchSiteConfig = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      const response = await databases.listDocuments(
-        databaseId,
-        siteConfigCollectionId
-      );
+      // Primeiro, tentar carregar do JSON database
+      let configData: SiteConfigData | null = null;
       
-      if (response.documents.length > 0) {
-        const config = response.documents[0] as unknown as SiteConfig;
-        setConfig(config);
+      try {
+        configData = await jsonDatabaseService.getSiteConfig();
+      } catch (err) {
+        console.log('JSON database not available, trying to load from public file');
+        
+        // Se não conseguir do JSON database, carregar do arquivo público
+        try {
+          const response = await fetch('/site_config.json');
+          if (response.ok) {
+            configData = await response.json();
+          }
+        } catch (fileErr) {
+          console.error('Error loading from public file:', fileErr);
+        }
+      }
+      
+      if (configData) {
+        const siteConfig = convertToSiteConfig(configData);
+        setConfig(siteConfig);
+      } else {
+        // Usar configuração padrão se não conseguir carregar
+        const defaultConfig: SiteConfig = {
+          $id: 'site-config',
+          site_name: 'VideosPlus',
+          paypal_client_id: '',
+          paypal_me_username: '',
+          stripe_publishable_key: '',
+          stripe_secret_key: '',
+          telegram_username: '',
+          video_list_title: 'Available Videos',
+          crypto: [],
+          email_host: 'smtp.gmail.com',
+          email_port: '587',
+          email_secure: false,
+          email_user: '',
+          email_pass: '',
+          email_from: '',
+          wasabi_config: {
+            accessKey: '',
+            secretKey: '',
+            region: '',
+            bucket: '',
+            endpoint: ''
+          }
+        };
+        setConfig(defaultConfig);
       }
     } catch (err) {
       console.error('Error fetching site config:', err);
       setError('Failed to load site configuration');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Function to update site configuration
+  const updateConfig = async (updates: Partial<SiteConfigData>) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Obter configuração atual
+      const currentConfig = await jsonDatabaseService.getSiteConfig();
+      
+      // Mesclar com as atualizações
+      const updatedConfig: SiteConfigData = {
+        ...currentConfig,
+        ...updates
+      };
+      
+      // Salvar no JSON database
+      await jsonDatabaseService.updateSiteConfig(updatedConfig);
+      
+      // Atualizar estado local
+      const siteConfig = convertToSiteConfig(updatedConfig);
+      setConfig(siteConfig);
+      
+    } catch (err) {
+      console.error('Error updating site config:', err);
+      setError('Failed to update site configuration');
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -114,10 +231,18 @@ export const SiteConfigProvider = ({ children }: { children: ReactNode }) => {
     emailUser: config?.email_user || '',
     emailPass: config?.email_pass || '',
     emailFrom: config?.email_from || '',
+    wasabiConfig: config?.wasabi_config || {
+      accessKey: '',
+      secretKey: '',
+      region: '',
+      bucket: '',
+      endpoint: ''
+    },
     siteConfig: config,
     loading,
     error,
     refreshConfig: fetchSiteConfig,
+    updateConfig,
   };
 
   return (
@@ -130,4 +255,4 @@ export const SiteConfigProvider = ({ children }: { children: ReactNode }) => {
 // Custom hook for using the context
 export const useSiteConfig = () => useContext(SiteConfigContext);
 
-export default SiteConfigContext; 
+export default SiteConfigContext;

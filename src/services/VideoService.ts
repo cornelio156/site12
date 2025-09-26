@@ -1,23 +1,22 @@
-import { databases, databaseId, videoCollectionId, storage, videosBucketId, thumbnailsBucketId } from './node_appwrite';
-import { Query, ID } from 'appwrite';
-import { CryptoService } from './CryptoService';
+import { jsonDatabaseService, VideoData } from './JSONDatabaseService';
+import { wasabiService } from './WasabiService';
 
-// Video interface
+// Video interface - mantém compatibilidade com o frontend
 export interface Video {
   $id: string;
   title: string;
   description: string;
   price: number;
   duration: string;
-  videoFileId?: string; // Keep for backward compatibility
-  video_id?: string; // Correct attribute name from CONTEXT.md
+  videoFileId?: string;
+  video_id?: string;
   thumbnailFileId?: string;
-  thumbnail_id?: string; // Support both naming conventions
+  thumbnail_id?: string;
   thumbnailUrl?: string;
   isPurchased?: boolean;
   createdAt: string;
   views: number;
-  product_link?: string; // Link to the full product after purchase
+  product_link?: string;
 }
 
 // Sort options
@@ -33,12 +32,24 @@ export class VideoService {
   // Cache para vídeos para melhorar performance
   private static videosCache: Video[] | null = null;
   private static cacheTimestamp: number = 0;
-  private static readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+  private static readonly CACHE_DURATION = 30 * 1000; // 30 segundos (reduzido para produção)
 
   // Método para limpar o cache
   private static clearCache(): void {
     this.videosCache = null;
     this.cacheTimestamp = 0;
+    console.log('Video cache cleared');
+  }
+
+  // Método público para limpar o cache (para uso externo)
+  public static clearCachePublic(): void {
+    this.clearCache();
+  }
+
+  // Método para forçar atualização do cache
+  private static async forceRefreshCache(): Promise<Video[]> {
+    this.clearCache();
+    return await this.getAllVideos();
   }
 
   // Verificar se o cache é válido
@@ -48,12 +59,14 @@ export class VideoService {
            (Date.now() - this.cacheTimestamp) < this.CACHE_DURATION;
   }
 
-  // Método para normalizar os objetos de vídeo
-  private static normalizeVideo(video: any): Video {
+  // Método para converter VideoData para Video (compatibilidade com frontend)
+  private static convertVideoData(videoData: VideoData): Video {
     // Converter duration (inteiro em segundos) para formato string (MM:SS ou HH:MM:SS)
     let formattedDuration = '00:00';
-    if (typeof video.duration === 'number') {
-      const totalSeconds = video.duration;
+    if (typeof videoData.duration === 'string') {
+      formattedDuration = videoData.duration;
+    } else if (typeof videoData.duration === 'number') {
+      const totalSeconds = videoData.duration;
       const minutes = Math.floor(totalSeconds / 60);
       const seconds = totalSeconds % 60;
       
@@ -66,26 +79,51 @@ export class VideoService {
       }
     }
     
-    // Descriptografar dados sensíveis
-    const decryptedVideo = CryptoService.decryptVideoData(video);
-    
-    // Garantir consistência nos campos - mapeando do esquema do banco para o formato esperado pelo frontend
     return {
-      $id: decryptedVideo.$id,
-      title: decryptedVideo.title || 'Untitled',
-      description: decryptedVideo.description || '',
-      price: typeof decryptedVideo.price === 'number' ? decryptedVideo.price : parseFloat(decryptedVideo.price || '0'),
-      duration: decryptedVideo.duration ? formattedDuration : '00:00', // Converter de inteiro para string formatada
-      videoFileId: decryptedVideo.video_id || null, // Mapear video_id para videoFileId no frontend
-      video_id: decryptedVideo.video_id || null, // Manter video_id para compatibilidade interna
-      thumbnailFileId: decryptedVideo.thumbnail_id || null, // Mapear thumbnail_id para thumbnailFileId no frontend
-      thumbnail_id: decryptedVideo.thumbnail_id || null, // Manter thumbnail_id para compatibilidade interna
-      thumbnailUrl: decryptedVideo.thumbnailUrl || null,
-      isPurchased: decryptedVideo.isPurchased || false,
-      createdAt: decryptedVideo.created_at || new Date().toISOString(), // Mapear created_at para createdAt no frontend
-      views: typeof decryptedVideo.views === 'number' ? decryptedVideo.views : 0,
-      product_link: decryptedVideo.product_link || ''
+      $id: videoData.id,
+      title: videoData.title,
+      description: videoData.description,
+      price: videoData.price,
+      duration: formattedDuration,
+      videoFileId: videoData.videoFileId,
+      video_id: videoData.videoFileId, // Para compatibilidade
+      thumbnailFileId: videoData.thumbnailFileId,
+      thumbnail_id: videoData.thumbnailFileId, // Para compatibilidade
+      thumbnailUrl: videoData.thumbnailUrl,
+      isPurchased: videoData.isPurchased || false,
+      createdAt: videoData.createdAt,
+      views: videoData.views,
+      product_link: videoData.productLink || ''
     };
+  }
+
+  // Get only video IDs (fast operation without metadata)
+  static async getVideoIds(sortOption: SortOption = SortOption.NEWEST): Promise<string[]> {
+    try {
+      console.log('Getting video IDs only (fast operation)');
+      
+      // Get video data from database (without thumbnails)
+      const videoDataList = await jsonDatabaseService.getAllVideos();
+      
+      // Convert to basic format and sort
+      const videos = videoDataList.map(videoData => ({
+        $id: videoData.id,
+        title: videoData.title,
+        price: videoData.price,
+        createdAt: videoData.createdAt,
+        views: videoData.views,
+        duration: videoData.duration
+      }));
+      
+      // Sort videos
+      const sortedVideos = this.sortVideos(videos as Video[], sortOption);
+      
+      // Return only IDs
+      return sortedVideos.map(video => video.$id);
+    } catch (error) {
+      console.error('Error getting video IDs:', error);
+      return [];
+    }
   }
 
   // Get all videos with sorting options
@@ -97,46 +135,13 @@ export class VideoService {
         return this.sortVideos([...this.videosCache!], sortOption);
       }
 
-      console.log('Buscando todos os vídeos da coleção com paginação');
+      console.log('Buscando todos os vídeos do SQLite database');
       
-      // Array para armazenar todos os vídeos
-      let allVideos: any[] = [];
+      // Buscar vídeos do SQLite database
+      const videoDataList = await jsonDatabaseService.getAllVideos();
       
-      // No Appwrite, usamos Query para paginação
-      let currentPage = 1;
-      let hasMorePages = true;
-      const limit = 200; // Aumentar ainda mais o tamanho da página para melhor performance
-      
-      while (hasMorePages) {
-        console.log(`Buscando página ${currentPage} de vídeos (limit: ${limit})`);
-        
-        // Use Query.limit() e Query.offset() para paginação
-        const queries = [
-          Query.limit(limit),
-          Query.offset((currentPage - 1) * limit)
-        ];
-        
-        const response = await databases.listDocuments(
-          databaseId,
-          videoCollectionId,
-          queries
-        );
-        
-        // Adicionar documentos da página atual ao array de todos os vídeos
-        allVideos = [...allVideos, ...response.documents];
-        
-        console.log(`Encontrados ${response.documents.length} vídeos na página ${currentPage}`);
-        console.log(`Total acumulado: ${allVideos.length} vídeos`);
-        
-        // Verificar se há mais páginas
-        hasMorePages = response.documents.length === limit;
-        currentPage++;
-      }
-      
-      console.log(`Total final: ${allVideos.length} vídeos encontrados no banco de dados`);
-      
-      // Normalizar todos os vídeos
-      let videos = allVideos.map(doc => this.normalizeVideo(doc));
+      // Converter para formato do frontend
+      let videos = videoDataList.map(videoData => this.convertVideoData(videoData));
       
       // Aplicar pesquisa do lado do cliente se a consulta for fornecida
       if (searchQuery && searchQuery.trim() !== '') {
@@ -147,39 +152,29 @@ export class VideoService {
         );
       }
 
+      // Obter URLs de miniaturas para cada vídeo
+      for (const video of videos) {
+        const thumbnailId = video.thumbnailFileId || video.thumbnail_id;
+        
+        if (thumbnailId) {
+          try {
+            video.thumbnailUrl = await wasabiService.getThumbnailUrl(thumbnailId);
+          } catch (error) {
+            console.error(`Erro ao obter miniatura para o vídeo ${video.$id}:`, error);
+            // Usar placeholder se a miniatura não estiver disponível
+            video.thumbnailUrl = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE4MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE4MCIgZmlsbD0iI2Y1ZjVmNSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5WaWRlbyBUaHVtYm5haWw8L3RleHQ+PC9zdmc+';
+          }
+        } else {
+          // Usar placeholder se não houver ID de miniatura
+          video.thumbnailUrl = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE4MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE4MCIgZmlsbD0iI2Y1ZjVmNSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5WaWRlbyBUaHVtYm5haWw8L3RleHQ+PC9zdmc+';
+        }
+      }
+
       // Atualizar cache se não há busca
       if (!searchQuery) {
         this.videosCache = [...videos];
         this.cacheTimestamp = Date.now();
         console.log('Cache atualizado com', videos.length, 'vídeos');
-      }
-      
-      // Obter URLs de miniaturas para cada vídeo
-      for (const video of videos) {
-        // Verificar ambas as convenções de nomenclatura
-        const thumbnailId = video.thumbnailFileId || video.thumbnail_id;
-        
-        // Registrar detalhes do vídeo para depuração
-        console.log(`Processando vídeo ${video.$id}: título=${video.title}, video_id=${video.video_id}, videoFileId=${video.videoFileId}, thumbnail_id=${video.thumbnail_id}, thumbnailFileId=${video.thumbnailFileId}`);
-        
-        if (thumbnailId) {
-          try {
-            // Descriptografar o ID da miniatura se estiver criptografado
-            const decryptedThumbnailId = CryptoService.isEncrypted(thumbnailId) 
-              ? CryptoService.decryptFileId(thumbnailId) 
-              : thumbnailId;
-            
-            const thumbnailUrl = await storage.getFileView(thumbnailsBucketId, decryptedThumbnailId);
-            video.thumbnailUrl = thumbnailUrl.href;
-          } catch (error) {
-            console.error(`Erro ao obter miniatura para o vídeo ${video.$id}:`, error);
-            // Usar placeholder se a miniatura não estiver disponível
-            video.thumbnailUrl = 'https://via.placeholder.com/300x180?text=Video+Thumbnail';
-          }
-        } else {
-          // Usar placeholder se não houver ID de miniatura
-          video.thumbnailUrl = 'https://via.placeholder.com/300x180?text=Video+Thumbnail';
-        }
       }
       
       // Ordenar vídeos
@@ -223,43 +218,43 @@ export class VideoService {
     }
   }
   
-  // Get a single video by ID
+  // Get a single video by ID (optimized for fast loading)
   static async getVideo(videoId: string): Promise<Video | null> {
     try {
-      const videoDoc = await databases.getDocument(
-        databaseId,
-        videoCollectionId,
-        videoId
-      );
+      console.log(`Getting single video ${videoId} (optimized)`);
+      const videoData = await jsonDatabaseService.getVideo(videoId);
       
-      const video = this.normalizeVideo(videoDoc);
+      if (!videoData) {
+        console.log(`Video ${videoId} not found in database`);
+        return null;
+      }
       
-      // Log video details for debugging
-      console.log(`Getting video ${videoId}: title=${video.title}, video_id=${video.video_id}, videoFileId=${video.videoFileId}, thumbnail_id=${video.thumbnail_id}, thumbnailFileId=${video.thumbnailFileId}`);
+      const video = this.convertVideoData(videoData);
       
-      // Get thumbnail URL
-      // Check for both naming conventions
+      // Get thumbnail URL asynchronously (non-blocking)
       const thumbnailId = video.thumbnailFileId || video.thumbnail_id;
       
       if (thumbnailId) {
-        try {
-          // Descriptografar o ID da miniatura se estiver criptografado
-          const decryptedThumbnailId = CryptoService.isEncrypted(thumbnailId) 
-            ? CryptoService.decryptFileId(thumbnailId) 
-            : thumbnailId;
-            
-          const thumbnailUrl = await storage.getFileView(thumbnailsBucketId, decryptedThumbnailId);
-          video.thumbnailUrl = thumbnailUrl.href;
-        } catch (error) {
+        // Load thumbnail in background, don't wait for it
+        wasabiService.getThumbnailUrl(thumbnailId)
+          .then(url => {
+            video.thumbnailUrl = url;
+            // Trigger a re-render if needed (optional)
+            console.log(`Thumbnail loaded for video ${video.$id}`);
+          })
+          .catch(error => {
           console.error(`Error getting thumbnail for video ${video.$id}:`, error);
-          // Use placeholder if thumbnail not available
-          video.thumbnailUrl = 'https://via.placeholder.com/300x180?text=Video+Thumbnail';
-        }
+            video.thumbnailUrl = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE4MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE4MCIgZmlsbD0iI2Y1ZjVmNSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5WaWRlbyBUaHVtYm5haWw8L3RleHQ+PC9zdmc+';
+          });
+        
+        // Set a placeholder immediately
+          video.thumbnailUrl = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE4MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE4MCIgZmlsbD0iI2Y1ZjVmNSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5WaWRlbyBUaHVtYm5haWw8L3RleHQ+PC9zdmc+';
       } else {
         // Use placeholder if no thumbnail ID
-        video.thumbnailUrl = 'https://via.placeholder.com/300x180?text=Video+Thumbnail';
+        video.thumbnailUrl = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE4MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE4MCIgZmlsbD0iI2Y1ZjVmNSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5WaWRlbyBUaHVtYm5haWw8L3RleHQ+PC9zdmc+';
       }
       
+      console.log(`Video ${videoId} loaded successfully`);
       return video;
     } catch (error) {
       console.error(`Error getting video ${videoId}:`, error);
@@ -267,29 +262,10 @@ export class VideoService {
     }
   }
   
-  
   // Increment view count for a video
   static async incrementViews(videoId: string): Promise<void> {
     try {
-      // Get current video
-      const video = await databases.getDocument(
-        databaseId,
-        videoCollectionId,
-        videoId
-      ) as unknown as Video;
-      
-      // Increment views
-      const currentViews = video.views || 0;
-      
-      // Update video document
-      await databases.updateDocument(
-        databaseId,
-        videoCollectionId,
-        videoId,
-        {
-          views: currentViews + 1
-        }
-      );
+      await jsonDatabaseService.incrementVideoViews(videoId);
     } catch (error) {
       console.error(`Error incrementing views for video ${videoId}:`, error);
     }
@@ -344,21 +320,16 @@ export class VideoService {
         return null;
       }
       
-      // Descriptografar o ID do arquivo se estiver criptografado
-      const decryptedFileId = CryptoService.isEncrypted(videoFileId) 
-        ? CryptoService.decryptFileId(videoFileId) 
-        : videoFileId;
+      console.log(`Attempting to get file URL for video ID: ${videoFileId}`);
       
-      console.log(`Attempting to get file URL for video ID: ${decryptedFileId} from bucket: ${videosBucketId}`);
-      
-      // Get video file URL - não verificamos mais o status de compra
+      // Get video file URL
       try {
-        const fileUrl = await storage.getFileView(videosBucketId, decryptedFileId);
-        console.log(`Video URL obtained: ${fileUrl.href}`);
-        return fileUrl.href;
+        const fileUrl = await wasabiService.getFileUrl(videoFileId);
+        console.log(`Video URL obtained: ${fileUrl}`);
+        return fileUrl;
       } catch (error) {
         console.error(`Error getting file URL:`, error);
-        console.error(`Bucket ID: ${videosBucketId}, Video File ID: ${decryptedFileId}`);
+        console.error(`Video File ID: ${videoFileId}`);
         return null;
       }
     } catch (error) {
@@ -366,4 +337,111 @@ export class VideoService {
       return null;
     }
   }
-} 
+
+  // Criar novo vídeo (para uso no admin)
+  static async createVideo(videoData: {
+    title: string;
+    description: string;
+    price: number;
+    duration: number;
+    videoFileId: string;
+    thumbnailFileId: string;
+    productLink?: string;
+  }): Promise<Video | null> {
+    try {
+      // Limpar cache antes da operação para evitar inconsistências
+      this.clearCache();
+
+      const newVideo = await jsonDatabaseService.createVideo({
+        title: videoData.title,
+        description: videoData.description,
+        price: videoData.price,
+        duration: videoData.duration.toString(),
+        videoFileId: videoData.videoFileId,
+        thumbnailFileId: videoData.thumbnailFileId,
+        productLink: videoData.productLink || '',
+        isActive: true,
+        isPurchased: false
+      });
+
+      // Forçar atualização do cache após criação
+      await this.forceRefreshCache();
+
+      return this.convertVideoData(newVideo);
+    } catch (error) {
+      console.error('Error creating video:', error);
+      return null;
+    }
+  }
+
+  // Atualizar vídeo (para uso no admin)
+  static async updateVideo(videoId: string, updates: {
+    title?: string;
+    description?: string;
+    price?: number;
+    duration?: number;
+    videoFileId?: string;
+    thumbnailFileId?: string;
+    productLink?: string;
+  }): Promise<Video | null> {
+    try {
+      // Limpar cache antes da operação para evitar inconsistências
+      this.clearCache();
+
+      const updateData: any = { ...updates };
+      if (updateData.duration) {
+        updateData.duration = updateData.duration.toString();
+      }
+
+      const updatedVideo = await jsonDatabaseService.updateVideo(videoId, updateData);
+      
+      if (!updatedVideo) {
+        return null;
+      }
+
+      // Forçar atualização do cache após atualização
+      await this.forceRefreshCache();
+
+      return this.convertVideoData(updatedVideo);
+    } catch (error) {
+      console.error('Error updating video:', error);
+      return null;
+    }
+  }
+
+  // Deletar vídeo (para uso no admin)
+  static async deleteVideo(videoId: string): Promise<boolean> {
+    try {
+      // Limpar cache antes da operação para evitar inconsistências
+      this.clearCache();
+
+      // Primeiro, obter os dados do vídeo para deletar os arquivos
+      const video = await this.getVideo(videoId);
+      if (video) {
+        const videoFileId = video.video_id || video.videoFileId;
+        const thumbnailFileId = video.thumbnail_id || video.thumbnailFileId;
+
+        // Deletar arquivos do Wasabi
+        if (videoFileId) {
+          await wasabiService.deleteFile(videoFileId);
+        }
+        if (thumbnailFileId) {
+          await wasabiService.deleteFile(thumbnailFileId);
+        }
+      }
+
+      // Deletar do JSON database
+      const success = await jsonDatabaseService.deleteVideo(videoId);
+      
+      if (success) {
+        // Forçar atualização do cache após exclusão
+        await this.forceRefreshCache();
+      }
+
+      return success;
+    } catch (error) {
+      console.error('Error deleting video:', error);
+      return false;
+    }
+  }
+}

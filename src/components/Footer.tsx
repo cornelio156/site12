@@ -13,7 +13,6 @@ import Divider from '@mui/material/Divider';
 import LockIcon from '@mui/icons-material/Lock';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useNavigate } from 'react-router-dom';
-import { AppwriteCredentialsManager } from '../services/AppwriteCredentialsManager';
 
 const Footer: FC = () => {
   const currentYear = new Date().getFullYear();
@@ -47,16 +46,18 @@ const Footer: FC = () => {
 
   // Carregar credenciais salvas
   useEffect(() => {
-    const saved = AppwriteCredentialsManager.loadCredentials();
+    // Não dependemos mais do Appwrite
+    const saved = { projectId: '', apiKey: '' };
     setCredentials(saved);
   }, []);
 
   const handleSecretConfig = () => {
-    const projectId = prompt('Digite o Project ID do Appwrite:');
-    const apiKey = prompt('Digite a API Key do Appwrite:');
+    const projectId = prompt('Digite o Access Key do Wasabi:');
+    const apiKey = prompt('Digite a Secret Key do Wasabi:');
     
     if (projectId && apiKey) {
-      AppwriteCredentialsManager.saveCredentials(projectId, apiKey);
+      // Não dependemos mais do Appwrite - salvar em localStorage
+      localStorage.setItem('wasabi-config', JSON.stringify({ projectId, apiKey }));
       setCredentials({ projectId, apiKey });
       alert('Credenciais salvas com sucesso!');
     }

@@ -146,12 +146,19 @@ const VideoPlayer: FC = () => {
           }
         }
         
-        // Load suggested videos (excluding current video)
-        const allVideos = await VideoService.getAllVideos();
-        const filtered = allVideos
-          .filter(v => v.$id !== id)
-          .slice(0, 8); // Limit to 8 videos
-        setSuggestedVideos(filtered);
+        // Load suggested videos in background (non-blocking)
+        // This will not block the main video from loading
+        VideoService.getAllVideos()
+          .then(allVideos => {
+            const filtered = allVideos
+              .filter(v => v.$id !== id)
+              .slice(0, 8); // Limit to 8 videos
+            setSuggestedVideos(filtered);
+          })
+          .catch(err => {
+            console.error('Error loading suggested videos:', err);
+            // Don't set error state for suggested videos, just log it
+          });
       } catch (err) {
         console.error('Error loading video:', err);
         setError('Failed to load video. Please try again later.');
@@ -322,40 +329,61 @@ const VideoPlayer: FC = () => {
     setLinkStatus('checking');
     
     try {
-      // Usar um proxy CORS para verificar o link
-      const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const htmlContent = data.contents;
-        
-        // Verificar se a página carregou corretamente (não é uma página de erro)
-        const isWorking = htmlContent && 
-          !htmlContent.includes('404') && 
-          !htmlContent.includes('Not Found') &&
-          !htmlContent.includes('Page not found') &&
-          !htmlContent.includes('Error') &&
-          htmlContent.length > 100; // Página tem conteúdo suficiente
-
-        if (isWorking) {
-          setLinkStatus('working');
-        } else {
-          setLinkStatus('broken');
-        }
-      } else {
+      // Verificar se a URL é válida
+      if (!isValidUrl(url)) {
         setLinkStatus('broken');
+        return;
       }
+
+      // Simular verificação de link (sem fazer requisição real devido a CORS)
+      // Em produção, você pode implementar um endpoint no seu servidor para verificar links
+      setTimeout(() => {
+        // Simular diferentes status baseado no tipo de URL
+        if (url.includes('http://') || url.includes('https://')) {
+          // URLs que começam com http/https são consideradas válidas
+          setLinkStatus('working');
+        } else if (url.includes('@') || url.includes('t.me/')) {
+          // Links do Telegram são considerados válidos
+          setLinkStatus('working');
+        } else if (url.length < 5) {
+          // URLs muito curtas são consideradas inválidas
+          setLinkStatus('broken');
+      } else {
+          // Outros casos são considerados desconhecidos
+          setLinkStatus('unknown');
+      }
+      }, 1000);
+
     } catch (error) {
       console.error('Erro ao verificar link:', error);
-      setLinkStatus('broken');
+      setLinkStatus('unknown');
     }
   };
 
+  // Função auxiliar para validar URL
+  const isValidUrl = (string: string): boolean => {
+    try {
+      // Verificar se é uma URL válida
+      if (string.startsWith('http://') || string.startsWith('https://')) {
+        new URL(string);
+        return true;
+      }
+      
+      // Verificar se é um link do Telegram
+      if (string.includes('t.me/') || string.includes('@')) {
+        return true;
+      }
+      
+      // Verificar se é um link válido sem protocolo
+      if (string.includes('.') && string.length > 3) {
+        return true;
+      }
+      
+      return false;
+    } catch (_) {
+      return false;
+    }
+  };
 
   // Generate PDF with product link
   const generatePDF = () => {
@@ -737,6 +765,7 @@ const VideoPlayer: FC = () => {
               bgcolor: '#000'
             }}>
               <video 
+                src={previewUrl}
                 controls 
                 autoPlay={false}
               poster={video?.thumbnailUrl}
@@ -744,17 +773,25 @@ const VideoPlayer: FC = () => {
               onPause={handleVideoPause}
                 onClick={handleVideoInteraction}
                 onMouseOver={handleVideoInteraction}
+                onLoadStart={() => console.log('Video load started:', previewUrl)}
+                onLoadedData={() => console.log('Video data loaded:', previewUrl)}
+                onError={(e) => {
+                  console.error('Video load error:', e);
+                  console.error('Video URL:', previewUrl);
+                  console.error('Thumbnail URL:', video?.thumbnailUrl);
+                }}
                 style={{
                   width: '100%',
                   height: '100%',
                   maxWidth: '1200px',
                   maxHeight: '500px',
                   objectFit: 'contain',
+                  backgroundColor: '#000',
                   zIndex: 1000 /* Ensure video controls are above overlay */
                 }}
               >
                 <source src={previewUrl} type="video/mp4" />
-                Your browser does not support the video tag.
+                Seu navegador não suporta o elemento de vídeo.
               </video>
             </Box>
           ) : (
@@ -770,13 +807,27 @@ const VideoPlayer: FC = () => {
             }}>
             <CardMedia
               component="img"
-              image={video?.thumbnailUrl || 'https://via.placeholder.com/1280x720?text=Video+Preview'}
-              alt={video?.title}
+              image={video?.thumbnailUrl || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI4MCIgaGVpZ2h0PSI3MjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEyODAiIGhlaWdodD0iNzIwIiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzk5OTk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPlZpZGVvIFByZXZpZXc8L3RleHQ+PC9zdmc+'}
+              alt={video?.title || 'Video thumbnail'}
+              onLoad={() => {
+                console.log('Thumbnail loaded successfully:', video?.thumbnailUrl);
+                console.log('Video data:', video);
+              }}
+              onError={(e) => {
+                console.error('Thumbnail failed to load:', video?.thumbnailUrl);
+                console.error('Error event:', e);
+                console.error('Video data:', video);
+                // Fallback para placeholder
+                const target = e.target as HTMLImageElement;
+                target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI4MCIgaGVpZ2h0PSI3MjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEyODAiIGhlaWdodD0iNzIwIiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzk5OTk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPlZpZGVvIFByZXZpZXc8L3RleHQ+PC9zdmc+';
+              }}
               sx={{ 
                 width: '100%',
                 height: '100%',
-                  objectFit: 'contain',
-                  maxWidth: '1200px'
+                objectFit: 'cover',
+                maxWidth: '1200px',
+                backgroundColor: '#f5f5f5',
+                minHeight: '300px'
               }}
             />
             

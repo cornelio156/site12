@@ -147,6 +147,31 @@ const VideoList: FC = () => {
     fetchVideos();
   }, [user, sortOption, debouncedSearchQuery, priceRange, durationFilter]);
 
+  // Verificação periódica para limpar cache se necessário
+  useEffect(() => {
+    const checkForUpdates = async () => {
+      try {
+        // Verificar se há sinal para limpar cache
+        const response = await fetch('/api/clear-cache', { method: 'POST' });
+        if (response.ok) {
+          console.log('Cache clear signal received, refreshing videos...');
+          VideoService.clearCachePublic();
+          // Recarregar vídeos
+          const allVideos = await VideoService.getAllVideos(sortOption, debouncedSearchQuery);
+          setVideos(allVideos);
+        }
+      } catch (error) {
+        // Ignorar erros de rede
+        console.log('Cache check failed:', error);
+      }
+    };
+
+    // Verificar a cada 10 segundos
+    const interval = setInterval(checkForUpdates, 10000);
+    
+    return () => clearInterval(interval);
+  }, [sortOption, debouncedSearchQuery]);
+
   const handleSortChange = (event: SelectChangeEvent) => {
     setSortOption(event.target.value as SortOption);
   };

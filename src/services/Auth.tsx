@@ -1,12 +1,10 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { FC, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { account, databases, databaseId, userCollectionId } from './node_appwrite';
-import { AppwriteException, Models, Query } from 'appwrite';
-import { SessionManager, Session } from './SessionManager';
+import { jsonDatabaseService, UserData, SessionData } from './JSONDatabaseService';
 
-// Define user type from Users collection
-interface UserData {
+// Define user type - mantém compatibilidade com o frontend
+interface User {
   $id: string;
   email: string;
   name: string;
@@ -16,7 +14,7 @@ interface UserData {
 
 // Define types
 interface AuthContextType {
-  user: UserData | null;
+  user: User | null;
   loading: boolean;
   error: string | null;
   login: (email: string, password: string, redirectPath?: string) => Promise<void>;
@@ -48,12 +46,12 @@ const SESSION_CHECK_INTERVAL = 5 * 60 * 1000;
 
 // Auth provider component
 export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<UserData | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [sessionCheckedAt, setSessionCheckedAt] = useState<number>(0);
-  const [currentSession, setCurrentSession] = useState<Session | null>(null);
+  const [currentSession, setCurrentSession] = useState<SessionData | null>(null);
   const navigate = useNavigate();
 
   // Check if user is logged in on mount
@@ -71,48 +69,47 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
     return () => clearInterval(intervalId);
   }, []);
 
-  // Login function using Users collection
+  // Login function using JSON database
   const login = async (email: string, password: string, redirectPath?: string) => {
     try {
       setLoading(true);
       setError(null);
       
-      // First, query the Users collection to find the user with the provided email
-      const response = await databases.listDocuments(
-        databaseId,
-        userCollectionId,
-        [
-          Query.equal('email', email)
-        ]
-      );
+      // First, query the JSON database to find the user with the provided email
+      const userData = await jsonDatabaseService.getUserByEmail(email);
       
-      if (response.documents.length === 0) {
+      if (!userData) {
         setError('Usuário não encontrado. Verifique suas credenciais.');
         return;
       }
       
-      const userData = response.documents[0] as unknown as UserData;
+      // Verify password hash using SHA256
+      const hashedPassword = await hashPasswordWithWebCrypto(password);
       
-      // In a real app, we would verify the password hash here
-      // For now, we're just checking if the password matches (UNSAFE, just for demo)
-      // In production, you should use proper password hashing and verification
-      
-      // This is a simplified check - in a real app, you would compare password hashes
-      if (password !== userData.password) {
+      if (hashedPassword !== userData.password) {
         setError('Senha inválida. Tente novamente.');
         return;
       }
       
       // Create a new session for this user
-      const session = await SessionManager.createSession(userData.$id);
+      const session = await createSession(userData.id);
       
       if (!session) {
         setError('Falha ao criar sessão. Tente novamente.');
         return;
       }
       
+      // Convert UserData to User for compatibility
+      const user: User = {
+        $id: userData.id,
+        email: userData.email,
+        name: userData.name,
+        password: userData.password,
+        created_at: userData.createdAt
+      };
+      
       // Store user data and session in state
-      setUser(userData);
+      setUser(user);
       setIsAuthenticated(true);
       setCurrentSession(session);
       setSessionCheckedAt(Date.now());
@@ -130,6 +127,38 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  // Create a new session for a user
+  const createSession = async (userId: string): Promise<SessionData | null> => {
+    try {
+      // Generate a unique session token
+      const token = generateSessionToken();
+      
+      // Create session expiration date (24 hours from now)
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24);
+      
+      // Session data
+      const sessionData: Omit<SessionData, 'id' | 'createdAt'> = {
+        userId,
+        token,
+        userAgent: navigator.userAgent.substring(0, 255),
+        expiresAt: expiresAt.toISOString(),
+        isActive: true,
+      };
+      
+      // Create session in JSON database
+      const session = await jsonDatabaseService.createSession(sessionData);
+      
+      // Store session token in local storage
+      localStorage.setItem('sessionToken', token);
+      
+      return session;
+    } catch (error) {
+      console.error('Error creating session:', error);
+      return null;
+    }
+  };
+
   // Logout function
   const logout = async () => {
     try {
@@ -137,12 +166,12 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
       
       // If we have a session, deactivate it
       if (currentSession) {
-        await SessionManager.deactivateSession(currentSession.$id);
+        await deactivateSession(currentSession.id);
       } else {
         // If no session in state, try to get current session
-        const session = await SessionManager.getCurrentSession();
+        const session = await getCurrentSession();
         if (session) {
-          await SessionManager.deactivateSession(session.$id);
+          await deactivateSession(session.id);
         }
       }
       
@@ -167,6 +196,70 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  // Deactivate a session
+  const deactivateSession = async (sessionId: string): Promise<void> => {
+    try {
+      await jsonDatabaseService.updateSession(sessionId, { isActive: false });
+      
+      // Remove session token from local storage
+      localStorage.removeItem('sessionToken');
+    } catch (error) {
+      console.error('Error deactivating session:', error);
+    }
+  };
+
+  // Get current session
+  const getCurrentSession = async (): Promise<SessionData | null> => {
+    const token = localStorage.getItem('sessionToken');
+    
+    if (!token) {
+      return null;
+    }
+    
+    return await validateSession(token);
+  };
+
+  // Validate a session
+  const validateSession = async (token: string): Promise<SessionData | null> => {
+    try {
+      console.log('Validating session with token:', token.substring(0, 10) + '...');
+      
+      // Get session from JSON database
+      const session = await jsonDatabaseService.getSessionByToken(token);
+      
+      if (!session) {
+        console.log('No session found with this token');
+        return null;
+      }
+      
+      console.log('Session found:', session.id, 'for user:', session.userId);
+      
+      // Check if session is active
+      if (!session.isActive) {
+        console.log('Session found, but is inactive');
+        return null;
+      }
+      
+      // Check if session has expired
+      const expiresAt = new Date(session.expiresAt);
+      const now = new Date();
+      console.log('Session expires at:', expiresAt, 'Now:', now);
+      
+      if (expiresAt < now) {
+        // Session has expired, deactivate it
+        console.log('Session expired, deactivating');
+        await deactivateSession(session.id);
+        return null;
+      }
+      
+      console.log('Session valid and active');
+      return session;
+    } catch (error) {
+      console.error('Error validating session:', error);
+      return null;
+    }
+  };
+
   // Check session function
   const checkSession = async () => {
     try {
@@ -179,7 +272,7 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
       setLoading(true);
       
       // Get current session
-      const session = await SessionManager.getCurrentSession();
+      const session = await getCurrentSession();
       setCurrentSession(session);
       setSessionCheckedAt(now);
       
@@ -190,15 +283,29 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
         return;
       }
       
-      // Fetch user data from Users collection using the session's userId
+      // Fetch user data from JSON database using the session's userId
       try {
-        const userData = await databases.getDocument(
-          databaseId,
-          userCollectionId,
-          session.userId
-        ) as unknown as UserData;
+        const userData = await jsonDatabaseService.getUser(session.userId);
         
-        setUser(userData);
+        if (!userData) {
+          // User not found, deactivate session
+          await deactivateSession(session.id);
+          setUser(null);
+          setIsAuthenticated(false);
+          setCurrentSession(null);
+          return;
+        }
+        
+        // Convert UserData to User for compatibility
+        const user: User = {
+          $id: userData.id,
+          email: userData.email,
+          name: userData.name,
+          password: userData.password,
+          created_at: userData.createdAt
+        };
+        
+        setUser(user);
         setIsAuthenticated(true);
       } catch (err) {
         // Error fetching user or user not found
@@ -207,7 +314,7 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
         setIsAuthenticated(false);
         
         // Deactivate invalid session
-        await SessionManager.deactivateSession(session.$id);
+        await deactivateSession(session.id);
         setCurrentSession(null);
       }
     } catch (err) {
@@ -219,6 +326,18 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Generate a random session token
+  const generateSessionToken = (): string => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let token = '';
+    
+    for (let i = 0; i < 64; i++) {
+      token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    
+    return token;
   };
 
   // Context value
@@ -235,6 +354,16 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
+
+// Hash password using Web Crypto API (browser)
+async function hashPasswordWithWebCrypto(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 
 // Custom hook to use auth context
 export const useAuth = () => useContext(AuthContext);

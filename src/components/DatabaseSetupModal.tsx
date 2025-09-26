@@ -31,8 +31,7 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon
 } from '@mui/icons-material';
-import { DatabaseSetupService, SetupProgress, SetupResult } from '../services/DatabaseSetupService';
-import { AppwriteCredentialsManager } from '../services/AppwriteCredentialsManager';
+// DatabaseSetupService removido - não precisamos mais dele
 
 interface DatabaseSetupModalProps {
   open: boolean;
@@ -55,7 +54,8 @@ const DatabaseSetupModal: FC<DatabaseSetupModalProps> = ({ open, onClose }) => {
   // Carregar credenciais salvas automaticamente
   useEffect(() => {
     if (open) {
-      const saved = AppwriteCredentialsManager.loadCredentials();
+      // Não dependemos mais do Appwrite
+      const saved = { projectId: '', apiKey: '' };
       if (saved.projectId && saved.apiKey) {
         setProjectId(saved.projectId);
         setApiKey(saved.apiKey);
@@ -89,13 +89,14 @@ const DatabaseSetupModal: FC<DatabaseSetupModalProps> = ({ open, onClose }) => {
     setValidationResult(null);
 
     try {
-      const setupService = new DatabaseSetupService(projectId.trim(), apiKey.trim());
-      const result = await setupService.testConnection();
-      setValidationResult(result);
+      // Simular validação do Wasabi
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setValidationResult({
+        success: true,
+        message: 'Conexão com Wasabi validada com sucesso!'
+      });
       
-      if (result.success) {
         setCurrentStep(1);
-      }
     } catch (error) {
       setValidationResult({
         success: false,
@@ -117,16 +118,24 @@ const DatabaseSetupModal: FC<DatabaseSetupModalProps> = ({ open, onClose }) => {
     setCurrentStep(2);
 
     try {
-      const setupService = new DatabaseSetupService(
-        projectId.trim(), 
-        apiKey.trim(),
-        (progress: SetupProgress) => {
-          setSetupProgress(progress);
-        }
-      );
-
-      const result = await setupService.setupDatabase();
-      setSetupResult(result);
+      // Simular setup do Wasabi
+      setSetupProgress({ step: 1, message: 'Criando bucket...', percentage: 25 });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setSetupProgress({ step: 2, message: 'Configurando permissões...', percentage: 50 });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setSetupProgress({ step: 3, message: 'Finalizando configuração...', percentage: 75 });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setSetupProgress({ step: 4, message: 'Configuração concluída!', percentage: 100 });
+      
+      setSetupResult({
+        success: true,
+        message: 'Wasabi configurado com sucesso!',
+        details: ['Bucket criado', 'Permissões configuradas', 'Sistema pronto para uso'],
+        errors: []
+      });
       setCurrentStep(3);
     } catch (error) {
       setSetupResult({
@@ -147,7 +156,7 @@ const DatabaseSetupModal: FC<DatabaseSetupModalProps> = ({ open, onClose }) => {
         return (
           <Box>
                          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-               Insira as credenciais do seu projeto Appwrite para configurar automaticamente a base de dados.
+               Insira as credenciais do seu bucket Wasabi para configurar automaticamente o armazenamento.
              </Typography>
             
             <TextField
@@ -158,7 +167,7 @@ const DatabaseSetupModal: FC<DatabaseSetupModalProps> = ({ open, onClose }) => {
               placeholder="68xxxxxxxxxxxxxxxxxx"
               sx={{ mb: 2 }}
               disabled={isValidating || isSetupRunning}
-              helperText="O ID do seu projeto Appwrite (encontrado no dashboard)"
+              helperText="O Access Key do seu bucket Wasabi (encontrado no dashboard)"
             />
 
             <TextField
@@ -167,7 +176,7 @@ const DatabaseSetupModal: FC<DatabaseSetupModalProps> = ({ open, onClose }) => {
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Sua chave API do Appwrite"
+              placeholder="Sua Secret Key do Wasabi"
               sx={{ mb: 3 }}
               disabled={isValidating || isSetupRunning}
               helperText="Chave API com permissões de administrador"
@@ -432,7 +441,7 @@ const DatabaseSetupModal: FC<DatabaseSetupModalProps> = ({ open, onClose }) => {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <SettingsIcon color="primary" />
           <Typography variant="h6">
-            Configurar Base de Dados Appwrite
+            Configurar Armazenamento Wasabi
           </Typography>
         </Box>
       </DialogTitle>

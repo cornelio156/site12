@@ -1,589 +1,266 @@
-/**
- * Servidor Express local para desenvolvimento
- * Este arquivo usa o formato ESM
- * Versão limpa sem funcionalidades de email
- */
-// Servidor Express para desenvolvimento local
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
-import bodyParser from 'body-parser';
-import { Client, Databases, Storage, Permission, Role, ID } from 'node-appwrite';
-import Stripe from 'stripe';
-import dotenv from 'dotenv';
-import http from 'http';
+import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import apiRoutes from './api-routes.js';
+// SQLite removido - usando Wasabi como fonte principal
 
-// Para trabalhar com __dirname em módulos ES
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Carregar variáveis de ambiente do .env
-dotenv.config();
-
 const app = express();
-const defaultPort = 3000;
-// Use Render's PORT environment variable, fallback to 3000 for local development
-let port = process.env.PORT ? parseInt(process.env.PORT, 10) : defaultPort;
+const PORT = process.env.PORT || 3000;
 
-// Middlewares
-app.use(cors());
-app.use(bodyParser.json({ limit: '10mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+// Middleware
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // In development, allow localhost
+    if (process.env.NODE_ENV !== 'production') {
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return callback(null, true);
+      }
+    }
+    
+    // In production, allow ALL domains - completamente aberto
+    if (process.env.NODE_ENV === 'production') {
+      return callback(null, true);
+    }
+    
+    // For any other case, allow the request
+    callback(null, true);
+  },
+  credentials: true
+}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.static('dist'));
 
-// Add request timeout middleware
-app.use((req, res, next) => {
-  req.setTimeout(120000); // 2 minutes
-  res.setTimeout(120000); // 2 minutes
-  next();
+// Caminhos dos arquivos JSON
+const DATA_DIR = path.join(__dirname, 'data');
+const VIDEOS_FILE = path.join(DATA_DIR, 'videos.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
+const SITE_CONFIG_FILE = path.join(DATA_DIR, 'site_config.json');
+
+// Garantir que o diretório de dados existe
+async function ensureDataDir() {
+  try {
+    await fs.access(DATA_DIR);
+  } catch {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    console.log('Data directory created');
+  }
+}
+
+// Função para ler arquivo JSON
+async function readJsonFile(filePath, defaultValue = []) {
+  try {
+    const data = await fs.readFile(filePath, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      console.log(`File ${filePath} not found, using default value`);
+      return defaultValue;
+    }
+    console.error(`Error reading ${filePath}:`, error);
+    throw error;
+  }
+}
+
+// Função para escrever arquivo JSON
+async function writeJsonFile(filePath, data) {
+  try {
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+    console.log(`Successfully wrote to ${filePath}`);
+  } catch (error) {
+    console.error(`Error writing to ${filePath}:`, error);
+    throw error;
+  }
+}
+
+// Inicializar arquivos de dados
+async function initializeDataFiles() {
+  await ensureDataDir();
+  
+  // Inicializar arquivos se não existirem
+  const files = [
+    { path: VIDEOS_FILE, default: [] },
+    { path: USERS_FILE, default: [] },
+    { path: SESSIONS_FILE, default: [] },
+    { path: SITE_CONFIG_FILE, default: {
+      siteName: 'VideosPlus',
+      paypalClientId: '',
+      paypalMeUsername: '',
+      stripePublishableKey: '',
+      stripeSecretKey: '',
+      telegramUsername: '',
+      videoListTitle: 'Available Videos',
+      crypto: [],
+      emailHost: 'smtp.gmail.com',
+      emailPort: '587',
+      emailSecure: false,
+      emailUser: '',
+      emailPass: '',
+      emailFrom: '',
+      wasabiConfig: {
+        accessKey: process.env.VITE_WASABI_ACCESS_KEY || '',
+        secretKey: process.env.VITE_WASABI_SECRET_KEY || '',
+        region: process.env.VITE_WASABI_REGION || '',
+        bucket: process.env.VITE_WASABI_BUCKET || '',
+        endpoint: process.env.VITE_WASABI_ENDPOINT || ''
+      }
+    }}
+  ];
+
+  for (const file of files) {
+    try {
+      await fs.access(file.path);
+    } catch {
+      await writeJsonFile(file.path, file.default);
+      console.log(`Created ${file.path}`);
+    }
+  }
+}
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    port: PORT
+  });
 });
 
-// Servir arquivos estáticos da pasta dist (para produção)
+// Usar as rotas da API
+app.use('/api', apiRoutes);
+
+// Servir arquivos estáticos do Vite (apenas em produção)
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'dist')));
-}
-
-// Health check endpoint for Render
-app.get('/api', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    message: 'API rodando!', 
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// Additional health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Endpoint para setup da base de dados Appwrite
-app.post('/api/setup', async (req, res) => {
-  // Configurar CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  console.log('📥 Requisição recebida:', req.body);
-  const { projectId, apiKey, action } = req.body;
-
-  if (!projectId || !apiKey) {
-    return res.status(400).json({ message: 'Project ID e API Key são obrigatórios' });
-  }
-
-  try {
-    // Configurar cliente Appwrite
-    const client = new Client()
-      .setEndpoint('https://fra.cloud.appwrite.io/v1')
-      .setProject(projectId)
-      .setKey(apiKey);
-
-    const databases = new Databases(client);
-    const storage = new Storage(client);
-
-    // IDs das collections e buckets
-    const databaseId = 'video_site_db';
-    const videoCollectionId = 'videos';
-    const userCollectionId = 'users';
-    const siteConfigCollectionId = 'site_config';
-    const sessionCollectionId = 'sessions';
-    const videosBucketId = 'videos_bucket';
-    const thumbnailsBucketId = 'thumbnails_bucket';
-
-    console.log('🔍 Ação solicitada:', action);
-    switch (action) {
-      case 'test-connection':
-        try {
-          await databases.list();
-          return res.json({ 
-            success: true, 
-            message: 'Conexão estabelecida com sucesso' 
-          });
-        } catch (error) {
-          console.error('Erro na conexão:', error);
-          return res.status(400).json({ 
-            success: false, 
-            message: 'Falha na conexão: Credenciais inválidas ou projeto não encontrado' 
-          });
-        }
-
-      case 'create-database':
-        try {
-          await databases.create(databaseId, 'Video Site Database');
-          return res.json({ success: true, message: 'Database criada com sucesso' });
-        } catch (error) {
-          if (error.message.includes('already exists')) {
-            return res.json({ success: true, message: 'Database já existe' });
-          }
-          throw error;
-        }
-
-      case 'create-collection':
-        const { collectionId, collectionName, collectionType } = req.body;
-        
-        try {
-          // Criar collection
-          await databases.createCollection(
-            databaseId,
-            collectionId,
-            collectionName,
-            [
-              Permission.read(Role.any()),
-              Permission.write(Role.users()),
-              Permission.create(Role.users()),
-              Permission.update(Role.users()),
-              Permission.delete(Role.users())
-            ]
-          );
-
-          // Aguardar um pouco para a collection ser criada
-          await new Promise(resolve => setTimeout(resolve, 1000));
-
-          // Criar atributos baseados no tipo
-          const attributes = getAttributesForType(collectionType);
-          for (const attr of attributes) {
-            try {
-              await createAttribute(databases, databaseId, collectionId, attr);
-              // Aguardar entre criação de atributos
-              await new Promise(resolve => setTimeout(resolve, 500));
-            } catch (attrError) {
-              // Ignorar se atributo já existe
-              if (!attrError.message.includes('already exists')) {
-                console.warn(`Erro ao criar atributo ${attr.key}:`, attrError);
-              }
-            }
-          }
-
-          // Aguardar um pouco antes de criar índices
-          await new Promise(resolve => setTimeout(resolve, 1000));
-
-          // Criar índices
-          const indexes = getIndexesForType(collectionType);
-          for (const index of indexes) {
-            try {
-              await databases.createIndex(databaseId, collectionId, index.key, index.type, index.attributes);
-              // Aguardar entre criação de índices
-              await new Promise(resolve => setTimeout(resolve, 500));
-            } catch (indexError) {
-              // Ignorar se índice já existe
-              if (!indexError.message.includes('already exists')) {
-                console.warn(`Erro ao criar índice ${index.key}:`, indexError);
-              }
-            }
-          }
-
-          return res.json({ success: true, message: `Collection '${collectionName}' criada e configurada` });
-        } catch (error) {
-          if (error.message.includes('already exists')) {
-            return res.json({ success: true, message: `Collection '${collectionName}' já existe` });
-          }
-          throw error;
-        }
-
-      case 'create-bucket':
-        const { bucketId, bucketName } = req.body;
-        
-        try {
-          await storage.createBucket(
-            bucketId,
-            bucketName,
-            [
-              Permission.read(Role.any()),
-              Permission.write(Role.users()),
-              Permission.create(Role.users()),
-              Permission.update(Role.users()),
-              Permission.delete(Role.users())
-            ]
-          );
-          return res.json({ success: true, message: `Bucket '${bucketName}' criado` });
-        } catch (error) {
-          if (error.message.includes('already exists')) {
-            return res.json({ success: true, message: `Bucket '${bucketName}' já existe` });
-          }
-          throw error;
-        }
-
-      case 'create-initial-data':
-        try {
-          // Verificar se já existe configuração do site
-          const siteConfigs = await databases.listDocuments(databaseId, siteConfigCollectionId);
-          
-          if (siteConfigs.documents.length === 0) {
-            // Criar configuração inicial do site
-            await databases.createDocument(
-              databaseId,
-              siteConfigCollectionId,
-              ID.unique(),
-              {
-                site_name: 'Video Site',
-                video_list_title: 'Featured Videos',
-                crypto: []
-              }
-            );
-            return res.json({ success: true, message: 'Configuração inicial do site criada' });
-          } else {
-            return res.json({ success: true, message: 'Configuração do site já existe' });
-          }
-        } catch (error) {
-          throw error;
-        }
-
-      default:
-        console.log('❌ Ação não reconhecida:', action);
-        return res.status(400).json({ message: 'Ação não reconhecida' });
-    }
-
-  } catch (error) {
-    console.error('Erro no setup:', error);
-    return res.status(500).json({ 
-      message: `Erro interno: ${error.message}` 
-    });
-  }
-});
-
-// Funções auxiliares para criar atributos e índices
-function getAttributesForType(type) {
-  switch (type) {
-    case 'video':
-      return [
-        { key: 'title', type: 'string', size: 255, required: true },
-        { key: 'description', type: 'string', size: 2000, required: false },
-        { key: 'price', type: 'float', required: true, min: 0 },
-        { key: 'duration', type: 'integer', required: false, min: 0 },
-        { key: 'video_id', type: 'string', size: 255, required: false },
-        { key: 'thumbnail_id', type: 'string', size: 255, required: false },
-        { key: 'created_at', type: 'datetime', required: false },
-        { key: 'is_active', type: 'boolean', required: false, default: true },
-        { key: 'views', type: 'integer', required: false, min: 0, default: 0 },
-        { key: 'product_link', type: 'string', size: 500, required: false }
-      ];
-
-    case 'user':
-      return [
-        { key: 'email', type: 'string', size: 255, required: true },
-        { key: 'name', type: 'string', size: 255, required: true },
-        { key: 'password', type: 'string', size: 255, required: true },
-        { key: 'created_at', type: 'datetime', required: false }
-      ];
-
-    case 'config':
-      return [
-        { key: 'site_name', type: 'string', size: 255, required: true },
-        { key: 'paypal_client_id', type: 'string', size: 255, required: false },
-        { key: 'stripe_publishable_key', type: 'string', size: 255, required: false },
-        { key: 'stripe_secret_key', type: 'string', size: 255, required: false },
-        { key: 'telegram_username', type: 'string', size: 255, required: false },
-        { key: 'video_list_title', type: 'string', size: 255, required: false },
-        { key: 'crypto', type: 'string', size: 2000, required: false, array: true },
-        { key: 'email_host', type: 'string', size: 255, required: false },
-        { key: 'email_port', type: 'string', size: 10, required: false },
-        { key: 'email_secure', type: 'boolean', required: false },
-        { key: 'email_user', type: 'string', size: 255, required: false },
-        { key: 'email_pass', type: 'string', size: 255, required: false },
-        { key: 'email_from', type: 'string', size: 255, required: false }
-      ];
-
-    case 'session':
-      return [
-        { key: 'user_id', type: 'string', size: 255, required: true },
-        { key: 'token', type: 'string', size: 255, required: true },
-        { key: 'expires_at', type: 'datetime', required: true },
-        { key: 'created_at', type: 'datetime', required: false },
-        { key: 'ip_address', type: 'string', size: 45, required: false },
-        { key: 'user_agent', type: 'string', size: 1000, required: false }
-      ];
-
-    default:
-      return [];
-  }
-}
-
-function getIndexesForType(type) {
-  switch (type) {
-    case 'video':
-      return [
-        { key: 'title_index', type: 'key', attributes: ['title'] },
-        { key: 'created_at_index', type: 'key', attributes: ['created_at'] },
-        { key: 'is_active_index', type: 'key', attributes: ['is_active'] }
-      ];
-
-    case 'user':
-      return [
-        { key: 'email_index', type: 'unique', attributes: ['email'] }
-      ];
-
-    case 'session':
-      return [
-        { key: 'token_index', type: 'unique', attributes: ['token'] },
-        { key: 'user_id_index', type: 'key', attributes: ['user_id'] },
-        { key: 'expires_at_index', type: 'key', attributes: ['expires_at'] }
-      ];
-
-    default:
-      return [];
-  }
-}
-
-async function createAttribute(databases, databaseId, collectionId, attr) {
-  if (attr.type === 'string') {
-    await databases.createStringAttribute(
-      databaseId,
-      collectionId,
-      attr.key,
-      attr.size,
-      attr.required,
-      attr.default,
-      attr.array || false
-    );
-  } else if (attr.type === 'integer') {
-    await databases.createIntegerAttribute(
-      databaseId,
-      collectionId,
-      attr.key,
-      attr.required,
-      attr.min,
-      attr.max,
-      attr.default,
-      attr.array || false
-    );
-  } else if (attr.type === 'float') {
-    await databases.createFloatAttribute(
-      databaseId,
-      collectionId,
-      attr.key,
-      attr.required,
-      attr.min,
-      attr.max,
-      attr.default,
-      attr.array || false
-    );
-  } else if (attr.type === 'boolean') {
-    await databases.createBooleanAttribute(
-      databaseId,
-      collectionId,
-      attr.key,
-      attr.required,
-      attr.default,
-      attr.array || false
-    );
-  } else if (attr.type === 'datetime') {
-    await databases.createDatetimeAttribute(
-      databaseId,
-      collectionId,
-      attr.key,
-      attr.required,
-      attr.default,
-      attr.array || false
-    );
-  }
-}
-
-// Endpoint para criar sessão de checkout do Stripe
-app.post('/api/create-checkout-session', async (req, res) => {
-  try {
-    // Buscar chave secreta do Stripe no Appwrite
-    let stripeSecretKey = '';
-    
-    // Inicializar cliente Appwrite com variáveis de ambiente
-    const projectId = process.env.VITE_APPWRITE_PROJECT_ID;
-    const apiKey = process.env.VITE_APPWRITE_API_KEY;
-    
-    console.log('Appwrite config:', { 
-      projectId: projectId ? 'Set' : 'Missing', 
-      apiKey: apiKey ? 'Set' : 'Missing' 
-    });
-    
-    if (!projectId || !apiKey) {
-      return res.status(500).json({ 
-        error: 'Appwrite credentials not configured',
-        details: 'VITE_APPWRITE_PROJECT_ID and VITE_APPWRITE_API_KEY must be set'
-      });
-    }
-    
-    const client = new Client()
-      .setEndpoint('https://fra.cloud.appwrite.io/v1') // Endpoint fixo
-      .setProject(projectId)
-      .setKey(apiKey);
-      
-    const databases = new Databases(client);
-    
-    try {
-      // Buscar configurações do site no Appwrite
-      console.log('Buscando configurações no Appwrite...');
-      
-      const response = await databases.listDocuments(
-        'video_site_db', // Database ID consistente
-        'site_config'    // Site Config Collection ID consistente
-      );
-      
-      console.log('Appwrite response:', { 
-        total: response.total, 
-        documents: response.documents.length 
-      });
-      
-      if (response.documents.length > 0) {
-        const config = response.documents[0];
-        stripeSecretKey = config.stripe_secret_key;
-        console.log('Chave secreta do Stripe obtida:', stripeSecretKey ? 'Yes' : 'No');
-      } else {
-        console.log('Nenhum documento de configuração encontrado no Appwrite');
-      }
-    } catch (appwriteError) {
-      console.error('Erro ao buscar chave do Stripe no Appwrite:', appwriteError);
-      return res.status(500).json({ 
-        error: 'Failed to fetch Stripe credentials from Appwrite',
-        details: appwriteError.message
-      });
-    }
-    
-    // Fallback para variável de ambiente se não encontrar no Appwrite
-    if (!stripeSecretKey) {
-      stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-      if (stripeSecretKey) {
-        console.log('Usando chave do Stripe da variável de ambiente como fallback');
-      } else {
-        console.error('Stripe secret key not found in Appwrite or environment variables');
-        return res.status(500).json({ 
-          error: 'Stripe secret key not found',
-          details: 'Configure stripe_secret_key in Appwrite site_config or set STRIPE_SECRET_KEY environment variable'
-        });
-      }
-    }
-    
-    // Inicializar Stripe com a chave obtida do Appwrite
-    console.log('Inicializando Stripe...');
-    const stripe = new Stripe(stripeSecretKey);
-    
-    const { amount, currency = 'usd', name, success_url, cancel_url } = req.body;
-
-    console.log('Dados recebidos para checkout:', JSON.stringify(req.body, null, 2));
-
-    // Validar os dados recebidos
-    if (!amount || typeof amount !== 'number' || amount <= 0) {
-      return res.status(400).json({ error: 'Amount é obrigatório e deve ser um número positivo' });
-    }
-    if (!name || typeof name !== 'string') {
-      return res.status(400).json({ error: 'Name é obrigatório e deve ser uma string' });
-    }
-    if (!success_url || typeof success_url !== 'string') {
-      return res.status(400).json({ error: 'success_url é obrigatório e deve ser uma string' });
-    }
-    if (!cancel_url || typeof cancel_url !== 'string') {
-      return res.status(400).json({ error: 'cancel_url é obrigatório e deve ser uma string' });
-    }
-
-    // Criar line_items baseado nos dados recebidos
-    const lineItems = [{
-      price_data: {
-        currency: 'usd', // Sempre usar USD
-        product_data: {
-          name: name,
-        },
-        unit_amount: Math.round(amount), // Amount já deve vir em centavos
-      },
-      quantity: 1,
-    }];
-
-    console.log('Line items criados:', JSON.stringify(lineItems, null, 2));
-
-    // Criar sessão de checkout
-    console.log('Criando sessão de checkout no Stripe...');
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: lineItems,
-      mode: 'payment',
-      success_url: success_url,
-      cancel_url: cancel_url,
-      billing_address_collection: 'auto',
-    });
-    
-    console.log('Sessão criada com sucesso:', session.id);
-    res.json({ sessionId: session.id, url: session.url });
-  } catch (error) {
-    console.error('Erro ao criar sessão de checkout:', error);
-    res.status(500).json({ 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined 
-    });
-  }
-});
-
-// Rota catch-all para SPA (deve vir por último)
-if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
   });
-}
-
-// Função para tentar conectar na porta especificada
-function startServer(targetPort) {
-  const server = http.createServer(app);
-  
-  // Configure timeouts for Render deployment
-  server.keepAliveTimeout = 120000; // 2 minutes
-  server.headersTimeout = 120000;   // 2 minutes
-  
-  // Bind to 0.0.0.0 for Render deployment (required for external access)
-  const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
-  
-  server.listen(targetPort, host, () => {
-    console.log(`🚀 Servidor rodando na porta ${targetPort} no host ${host}`);
-    console.log(`📱 Acesse: http://${host}:${targetPort}`);
-    console.log('💳 API Stripe configurada e pronta para uso!');
-    console.log('📄 Use /api/create-checkout-session para criar sessões de checkout Stripe.');
-    console.log('🔧 API de setup Appwrite configurada!');
-    console.log('📄 Use /api/setup para testar conexão com Appwrite.');
-    
-    if (port !== 3000) {
-      console.log(`ATENÇÃO: A API está rodando na porta ${port} em vez da porta padrão 3000.`);
-      console.log(`Se você configurou sua aplicação para usar http://localhost:3000, atualize para http://${host}:${port}`);
-    }
-  });
-
-  server.on('error', (error) => {
-    if (error.code === 'EADDRINUSE') {
-      console.log(`❌ Porta ${targetPort} está em uso. Tentando porta ${targetPort + 1}...`);
-      port = targetPort + 1;
-      startServer(port);
+} else {
+  // Em desenvolvimento, redirecionar para o servidor do Vite (exceto para rotas da API)
+  app.get('*', (req, res) => {
+    if (req.path.startsWith('/api/')) {
+      res.status(404).json({ error: 'API endpoint not found' });
     } else {
-      console.error('❌ Erro ao iniciar servidor:', error);
+      res.redirect('http://localhost:5173' + req.originalUrl);
     }
   });
 }
 
-// Process error handlers
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  process.exit(1);
-});
+// Inicializar e iniciar servidor
+async function startServer() {
+  try {
+    console.log('Iniciando servidor com Wasabi como fonte principal...');
+    
+    // Inicializar arquivos de dados (para compatibilidade)
+    await initializeDataFiles();
+    console.log('Data files initialized');
+    
+    // Iniciar servidor primeiro
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`API available at http://localhost:${PORT}/api`);
+      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      
+      // Verificar se arquivo JSON existe no Wasabi, se não existir, criar com dados iniciais
+      setTimeout(async () => {
+        try {
+          console.log('Verificando se arquivo JSON existe no Wasabi...');
+          
+          // Tentar verificar se o arquivo existe
+          const checkResponse = await fetch(`http://localhost:${PORT}/api/backup/status`);
+          let fileExists = false;
+          
+          if (checkResponse.ok) {
+            const status = await checkResponse.json();
+            fileExists = status.hasBackup;
+          }
+          
+          if (!fileExists) {
+            console.log('Arquivo JSON não encontrado no Wasabi, criando com dados iniciais...');
+            
+            // Criar dados iniciais com configuração do site
+            const initialData = {
+              videos: [],
+              users: [
+                {
+                  id: 'admin-001',
+                  email: 'admin@gmail.com',
+                  name: 'Administrador',
+                  password: '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', // admin123 em SHA256 (hash correto)
+                  createdAt: new Date().toISOString()
+                }
+              ],
+              sessions: [],
+              siteConfig: {
+                siteName: 'VideosPlus',
+                paypalClientId: '',
+                paypalMeUsername: '',
+                stripePublishableKey: '',
+                stripeSecretKey: '',
+                telegramUsername: 'nlyadm19',
+                videoListTitle: 'Available Videos',
+                crypto: [],
+                emailHost: 'smtp.gmail.com',
+                emailPort: '587',
+                emailSecure: false,
+                emailUser: '',
+                emailPass: '',
+                emailFrom: '',
+                wasabiConfig: {
+                  accessKey: process.env.VITE_WASABI_ACCESS_KEY || '',
+                  secretKey: process.env.VITE_WASABI_SECRET_KEY || '',
+                  region: process.env.VITE_WASABI_REGION || '',
+                  bucket: process.env.VITE_WASABI_BUCKET || '',
+                  endpoint: process.env.VITE_WASABI_ENDPOINT || ''
+                }
+              }
+            };
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully');
-  process.exit(0);
-});
-
-// Iniciar servidor
-if (process.env.NODE_ENV !== 'test') {
-  startServer(port);
+            // Fazer upload do arquivo inicial para o Wasabi
+            const formData = new FormData();
+            const blob = new Blob([JSON.stringify(initialData, null, 2)], { type: 'application/json' });
+            formData.append('file', blob, 'videosplus-data.json');
+            
+            const response = await fetch(`http://localhost:${PORT}/api/upload/metadata`, {
+              method: 'POST',
+              body: formData
+            });
+            
+            if (response.ok) {
+              console.log('Arquivo JSON inicial criado com sucesso no Wasabi');
+              console.log('Dados iniciais incluídos:');
+              console.log('- Usuário admin: admin@gmail.com / admin123');
+              console.log('- Configuração do site: VideosPlus');
+              console.log('- Configuração Wasabi:', process.env.VITE_WASABI_BUCKET || 'não configurado');
+            } else {
+              console.log('Erro ao criar arquivo JSON inicial no Wasabi');
+            }
+          } else {
+            console.log('Arquivo JSON já existe no Wasabi, mantendo dados existentes');
+          }
+          
+        } catch (error) {
+          console.log('Erro ao verificar/criar arquivo JSON:', error.message);
+        }
+      }, 1000); // Aguardar 1 segundo para o servidor estar pronto
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
 }
+
+startServer();

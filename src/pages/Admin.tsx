@@ -3,13 +3,10 @@ import type { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../services/Auth';
 import { VideoService } from '../services/VideoService';
-import { AppwriteSchemaManager } from '../services/AppwriteSchemaManager';
-import { CryptoService } from '../services/CryptoService';
-import { ID, Permission, Role } from 'appwrite';
+import { wasabiService } from '../services/WasabiService';
+import { jsonDatabaseService } from '../services/JSONDatabaseService';
 import { useSiteConfig } from '../context/SiteConfigContext';
-import { databases, databaseId, storage, videoCollectionId, siteConfigCollectionId, userCollectionId, videosBucketId, thumbnailsBucketId } from '../services/node_appwrite';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import Switch from '@mui/material/Switch';
 import SendIcon from '@mui/icons-material/Send';
 import Container from '@mui/material/Container';
 import Box from '@mui/material/Box';
@@ -30,11 +27,14 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import IconButton from '@mui/material/IconButton';
 import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
+import LinearProgress from '@mui/material/LinearProgress';
+import EditIcon from '@mui/icons-material/Edit';
 import CancelIcon from '@mui/icons-material/Cancel';
 import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
+import Chip from '@mui/material/Chip';
+import Switch from '@mui/material/Switch';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -47,7 +47,6 @@ import MenuItem from '@mui/material/MenuItem';
 import InputAdornment from '@mui/material/InputAdornment';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import { styled } from '@mui/material/styles';
-import LinearProgress from '@mui/material/LinearProgress';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardMedia from '@mui/material/CardMedia';
@@ -141,12 +140,25 @@ interface SiteConfig {
   telegram_username: string;
   video_list_title?: string;
   crypto?: string[];
+  email_host?: string;
+  email_port?: string;
+  email_secure?: boolean;
+  email_user?: string;
+  email_pass?: string;
+  email_from?: string;
+  wasabi_config?: {
+    accessKey: string;
+    secretKey: string;
+    region: string;
+    bucket: string;
+    endpoint: string;
+  };
 }
 
 // Admin page component
 const Admin: FC = () => {
   const { user } = useAuth();
-  const { refreshConfig } = useSiteConfig();
+  const { refreshConfig, updateConfig } = useSiteConfig();
   const [tabValue, setTabValue] = useState(0);
   
   // Videos state
@@ -194,6 +206,21 @@ const Admin: FC = () => {
   const [selectedCrypto, setSelectedCrypto] = useState('BTC');
   const [editingConfig, setEditingConfig] = useState(false);
   
+  // Email config state
+  const [emailHost, setEmailHost] = useState('');
+  const [emailPort, setEmailPort] = useState('');
+  const [emailSecure, setEmailSecure] = useState(false);
+  const [emailUser, setEmailUser] = useState('');
+  const [emailPass, setEmailPass] = useState('');
+  const [emailFrom, setEmailFrom] = useState('');
+  
+  // Wasabi config state
+  const [wasabiAccessKey, setWasabiAccessKey] = useState('');
+  const [wasabiSecretKey, setWasabiSecretKey] = useState('');
+  const [wasabiRegion, setWasabiRegion] = useState('');
+  const [wasabiBucket, setWasabiBucket] = useState('');
+  const [wasabiEndpoint, setWasabiEndpoint] = useState('');
+  
   // Available cryptocurrencies
   const cryptoCurrencies = [
     { code: 'BTC', name: 'Bitcoin' },
@@ -221,10 +248,7 @@ const Admin: FC = () => {
   
   // Video element ref for getting duration
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  
-  // Schema initialization state
-  const [initializingSchema, setInitializingSchema] = useState(false);
-  
+
   // Event listener for show-feedback events
   useEffect(() => {
     const handleShowFeedback = (event: Event) => {
@@ -255,14 +279,13 @@ const Admin: FC = () => {
       fetchSiteConfig();
     }
   }, [tabValue]);
-  
+
   // Fetch videos from database
   const fetchVideos = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // Use VideoService instead of direct database call to get all videos with pagination
       const allVideos = await VideoService.getAllVideos();
       console.log(`Admin: Fetched ${allVideos.length} videos using VideoService`);
       
@@ -299,12 +322,18 @@ const Admin: FC = () => {
       setLoading(true);
       setError(null);
       
-      const response = await databases.listDocuments(
-        databaseId,
-        userCollectionId
-      );
+      const usersData = await jsonDatabaseService.getAllUsers();
       
-      setUsers(response.documents as unknown as User[]);
+      // Convert to admin format
+      const adminUsers = usersData.map(user => ({
+        $id: user.id,
+        email: user.email,
+        name: user.name,
+        password: user.password,
+        created_at: user.createdAt
+      })) as unknown as User[];
+      
+      setUsers(adminUsers);
     } catch (err) {
       console.error('Error fetching users:', err);
       setError('Failed to load users. Please try again.');
@@ -319,13 +348,21 @@ const Admin: FC = () => {
       setLoading(true);
       setError(null);
       
-      const response = await databases.listDocuments(
-        databaseId,
-        siteConfigCollectionId
-      );
+      const configData = await jsonDatabaseService.getSiteConfig();
       
-      if (response.documents.length > 0) {
-        const config = response.documents[0] as unknown as SiteConfig;
+      if (configData) {
+        const config: SiteConfig = {
+          $id: 'site-config',
+          site_name: configData.siteName,
+          paypal_client_id: configData.paypalClientId,
+          paypal_me_username: configData.paypalMeUsername,
+          stripe_publishable_key: configData.stripePublishableKey,
+          stripe_secret_key: configData.stripeSecretKey,
+          telegram_username: configData.telegramUsername,
+          video_list_title: configData.videoListTitle,
+          crypto: configData.crypto
+        };
+        
         setSiteConfig(config);
         setSiteName(config.site_name);
         setPaypalClientId(config.paypal_client_id);
@@ -334,25 +371,23 @@ const Admin: FC = () => {
         setStripeSecretKey(config.stripe_secret_key || '');
         setTelegramUsername(config.telegram_username);
         setVideoListTitle(config.video_list_title || 'Available Videos');
+        setCryptoWallets(config.crypto || []);
         
-        // Check if crypto wallets are available in the database
-        if (config.crypto && config.crypto.length > 0) {
-          setCryptoWallets(config.crypto);
-        } else {
-          // Try to load from localStorage if not available in the database
-          const storedWallets = localStorage.getItem('cryptoWallets');
-          if (storedWallets) {
-            try {
-              const parsedWallets = JSON.parse(storedWallets);
-              setCryptoWallets(parsedWallets);
-              console.log('Loaded crypto wallets from localStorage:', parsedWallets);
-            } catch (err) {
-              console.error('Error parsing stored crypto wallets:', err);
-              setCryptoWallets([]);
-            }
-          } else {
-            setCryptoWallets([]);
-          }
+        // Email settings
+        setEmailHost(configData.emailHost || '');
+        setEmailPort(configData.emailPort || '');
+        setEmailSecure(configData.emailSecure || false);
+        setEmailUser(configData.emailUser || '');
+        setEmailPass(configData.emailPass || '');
+        setEmailFrom(configData.emailFrom || '');
+        
+        // Wasabi settings
+        if (configData.wasabiConfig) {
+          setWasabiAccessKey(configData.wasabiConfig.accessKey || '');
+          setWasabiSecretKey(configData.wasabiConfig.secretKey || '');
+          setWasabiRegion(configData.wasabiConfig.region || '');
+          setWasabiBucket(configData.wasabiConfig.bucket || '');
+          setWasabiEndpoint(configData.wasabiConfig.endpoint || '');
         }
       }
     } catch (err) {
@@ -362,775 +397,7 @@ const Admin: FC = () => {
       setLoading(false);
     }
   };
-  
-  // Handle video file selection and extract duration
-  const handleVideoFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files[0]) {
-      const file = event.target.files[0];
-      setVideoFile(file);
-      
-      // Create a URL for the video to get its duration
-      const videoUrl = URL.createObjectURL(file);
-      
-      // Create a video element to get duration
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      
-      video.onloadedmetadata = () => {
-        // Get duration in seconds and round to nearest integer
-        const duration = Math.round(video.duration);
-        setVideoDuration(duration);
-        URL.revokeObjectURL(videoUrl);
-      };
-      
-      video.src = videoUrl;
-    }
-  };
-  
-  // Handle thumbnail file selection
-  const handleThumbnailFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files[0]) {
-      setThumbnailFile(event.target.files[0]);
-    }
-  };
-  
-  // Edit video
-  const handleEditVideo = (video: Video) => {
-    setVideoTitle(video.title);
-    setVideoDescription(video.description);
-    setVideoPrice(video.price.toString());
-    setProductLink(video.product_link || '');
-    setVideoDuration(video.duration || null);
-    setEditingVideo(video.$id);
-    setShowVideoForm(true);
-  };
-  
-  // Reset video form
-  const resetVideoForm = () => {
-    setVideoTitle('');
-    setVideoDescription('');
-    setVideoPrice('');
-    setProductLink('');
-    setVideoFile(null);
-    setThumbnailFile(null);
-    setVideoDuration(null);
-    setEditingVideo(null);
-  };
-  
-  // Helper function to create encrypted file name
-  const createEncryptedFileName = (originalFileName: string, fileType: 'video' | 'thumbnail'): string => {
-    const timestamp = Date.now();
-    const randomSuffix = Math.random().toString(36).substring(2, 8);
-    const encryptedName = CryptoService.encryptFileName(originalFileName);
-    const extension = originalFileName.split('.').pop() || '';
-    return `${fileType}_${timestamp}_${randomSuffix}_${encryptedName}.${extension}`;
-  };
 
-  // Upload video and thumbnail
-  const handleVideoUpload = async () => {
-    if (!videoTitle || !videoDescription || !videoPrice || !productLink) {
-      setError('Please fill all required fields');
-      return;
-    }
-    
-    // For new videos, require files
-    if (!editingVideo && (!videoFile || !thumbnailFile || !videoDuration)) {
-      setError('Please select both video and thumbnail files');
-      return;
-    }
-    
-    try {
-      setUploading(true);
-      setError(null);
-      
-      let videoId = '';
-      let thumbnailId = '';
-      
-      // If editing, only upload new files if provided
-      if (editingVideo) {
-        // Get current video data
-        const existingVideo = await databases.getDocument(
-          databaseId,
-          videoCollectionId,
-          editingVideo
-        ) as unknown as Video;
-        
-        videoId = existingVideo.video_id || '';
-        thumbnailId = existingVideo.thumbnail_id || '';
-        
-        // Upload new thumbnail if provided
-        if (thumbnailFile) {
-          // Delete old thumbnail if exists
-          if (thumbnailId) {
-            try {
-              await storage.deleteFile(thumbnailsBucketId, thumbnailId);
-            } catch (err) {
-              console.error('Error deleting old thumbnail:', err);
-            }
-          }
-          
-          // Create encrypted file name for thumbnail
-          const encryptedThumbnailName = createEncryptedFileName(thumbnailFile.name, 'thumbnail');
-          
-          // Upload new thumbnail with encrypted name
-          const thumbnailUpload = await storage.createFile(
-            thumbnailsBucketId,
-            ID.unique(),
-            thumbnailFile,
-            [Permission.read(Role.any())],
-            encryptedThumbnailName
-          );
-          thumbnailId = thumbnailUpload.$id;
-        }
-        
-        // Upload new video if provided
-        if (videoFile) {
-          // Delete old video if exists
-          if (videoId) {
-            try {
-              await storage.deleteFile(videosBucketId, videoId);
-            } catch (err) {
-              console.error('Error deleting old video:', err);
-            }
-          }
-          
-          // Create encrypted file name for video
-          const encryptedVideoName = createEncryptedFileName(videoFile.name, 'video');
-          
-          // Upload new video with encrypted name
-          const videoUpload = await storage.createFile(
-            videosBucketId,
-            ID.unique(),
-            videoFile,
-            [Permission.read(Role.any())],
-            encryptedVideoName
-          );
-          videoId = videoUpload.$id;
-        }
-        
-        try {
-          // Primeiro tente com todos os campos obrigatórios
-          // Para edição, vamos preservar valores existentes quando não fornecidos
-          const requiredFields = {
-            title: CryptoService.encryptVideoTitle(videoTitle),
-            description: CryptoService.encryptVideoDescription(videoDescription),
-            price: parseFloat(videoPrice),
-            product_link: CryptoService.encryptProductLink(productLink),
-            video_id: videoId ? CryptoService.encryptFileId(videoId) : existingVideo.video_id,
-            thumbnail_id: thumbnailId ? CryptoService.encryptFileId(thumbnailId) : existingVideo.thumbnail_id
-          };
-          
-          await databases.updateDocument(
-            databaseId,
-            videoCollectionId,
-            editingVideo,
-            requiredFields
-          );
-          
-          // Se deu certo, tente atualizar os campos adicionais
-          try {
-            const optionalFields = {
-              ...(videoDuration ? { duration: videoDuration } : {})
-            };
-            
-            if (Object.keys(optionalFields).length > 0) {
-              await databases.updateDocument(
-                databaseId,
-                videoCollectionId,
-                editingVideo,
-                optionalFields
-              );
-            }
-          } catch (err: any) {
-            console.error('Erro ao atualizar campos adicionais do vídeo:', err);
-            showFeedback('Alguns campos adicionais do vídeo não puderam ser atualizados porque os atributos não existem.', 'error');
-          }
-          
-          // Show success message
-          setSnackbarMessage('Video successfully updated!');
-          setSnackbarSeverity('success');
-          setSnackbarOpen(true);
-        } catch (err: any) {
-          // Se houve erro nos campos obrigatórios
-          console.error('Error updating video:', err);
-          
-          if (err.message && err.message.includes('Attribute')) {
-            setError(`Erro ao salvar vídeo: Atributo não encontrado. Execute "Initialize Schema" primeiro e crie o atributo manualmente: ${err.message}`);
-          } else {
-            setError(`Erro ao salvar vídeo: ${err.message}`);
-          }
-          
-          // Show error message
-          setSnackbarMessage('Failed to update video. Please check if all required attributes exist.');
-          setSnackbarSeverity('error');
-          setSnackbarOpen(true);
-          return;
-        }
-      } else {
-        // Create encrypted file names
-        const encryptedThumbnailName = createEncryptedFileName(thumbnailFile!.name, 'thumbnail');
-        const encryptedVideoName = createEncryptedFileName(videoFile!.name, 'video');
-        
-        // Upload thumbnail with encrypted name
-        const thumbnailUpload = await storage.createFile(
-          thumbnailsBucketId,
-          ID.unique(),
-          thumbnailFile!,
-          [Permission.read(Role.any())],
-          encryptedThumbnailName
-        );
-        
-        // Upload video with encrypted name
-        const videoUpload = await storage.createFile(
-          videosBucketId,
-          ID.unique(),
-          videoFile!,
-          [Permission.read(Role.any())],
-          encryptedVideoName
-        );
-        
-        try {
-          // Criar documento de vídeo com TODOS os campos obrigatórios
-          // Aqui vemos na captura de tela que title, description, price, product_link, video_id e thumbnail_id são required
-          const videoDoc = await databases.createDocument(
-            databaseId,
-            videoCollectionId,
-            ID.unique(),
-            {
-              title: CryptoService.encryptVideoTitle(videoTitle),
-              description: CryptoService.encryptVideoDescription(videoDescription),
-              price: parseFloat(videoPrice),
-              product_link: CryptoService.encryptProductLink(productLink),
-              video_id: CryptoService.encryptFileId(videoUpload.$id),        // Campo obrigatório
-              thumbnail_id: CryptoService.encryptFileId(thumbnailUpload.$id), // Campo obrigatório
-              created_at: new Date().toISOString(), // Campo obrigatório
-              is_active: true                    // Campo obrigatório
-            }
-          );
-          
-          // Adicionar campos opcionais se os atributos existirem
-          try {
-            await databases.updateDocument(
-              databaseId,
-              videoCollectionId,
-              videoDoc.$id,
-              {
-                duration: videoDuration ? parseInt(videoDuration.toString()) : 0,
-                views: 0
-              }
-            );
-          } catch (err: any) {
-            console.error('Erro ao adicionar campos adicionais ao vídeo:', err);
-            showFeedback('O vídeo foi criado, mas alguns campos adicionais não puderam ser salvos porque os atributos não existem.', 'error');
-          }
-          
-          // Show success message
-          setSnackbarMessage('Video successfully uploaded!');
-          setSnackbarSeverity('success');
-          setSnackbarOpen(true);
-        } catch (err: any) {
-          // Se houve erro nos campos obrigatórios
-          console.error('Error creating video:', err);
-          
-          // Limpar os arquivos enviados em caso de erro
-          try {
-            await storage.deleteFile(thumbnailsBucketId, thumbnailUpload.$id);
-            await storage.deleteFile(videosBucketId, videoUpload.$id);
-          } catch (deleteErr) {
-            console.error('Error cleaning up uploaded files after error:', deleteErr);
-          }
-          
-          if (err.message && err.message.includes('Attribute')) {
-            setError(`Erro ao criar vídeo: Atributo não encontrado. Execute "Initialize Schema" primeiro e crie o atributo manualmente: ${err.message}`);
-          } else {
-            setError(`Erro ao criar vídeo: ${err.message}`);
-          }
-          
-          // Show error message
-          setSnackbarMessage('Failed to create video. Please check if all required attributes exist.');
-          setSnackbarSeverity('error');
-          setSnackbarOpen(true);
-          return;
-        }
-      }
-      
-      // Reset form
-      resetVideoForm();
-      
-      // Hide the form
-      setShowVideoForm(false);
-      
-      // Refresh videos list
-      fetchVideos();
-      
-    } catch (err: any) {
-      console.error('Error uploading video:', err);
-      
-      if (err.message && err.message.includes('Attribute')) {
-        setError(`Erro ao salvar vídeo: Atributo não encontrado. Execute "Initialize Schema" primeiro e crie o atributo manualmente: ${err.message}`);
-      } else {
-        setError(`Erro ao salvar vídeo: ${err.message}`);
-      }
-      
-      // Show error message
-      setSnackbarMessage('Failed to save video. Please check if all required attributes exist.');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-    } finally {
-      setUploading(false);
-      setUploadProgress(0);
-    }
-  };
-  
-  // Delete video
-  const handleDeleteVideo = async (id: string) => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Get video document to get file IDs
-      const video = await databases.getDocument(
-        databaseId,
-        videoCollectionId,
-        id
-      ) as unknown as Video;
-      
-      // Decrypt file IDs before using them for deletion
-      let decryptedVideoId = '';
-      let decryptedThumbnailId = '';
-      
-      if (video.video_id) {
-        try {
-          decryptedVideoId = CryptoService.decryptFileId(video.video_id);
-        } catch (err) {
-          console.error('Error decrypting video_id:', err);
-          // If decryption fails, try using the original value (might be unencrypted)
-          decryptedVideoId = video.video_id;
-        }
-      }
-      
-      if (video.thumbnail_id) {
-        try {
-          decryptedThumbnailId = CryptoService.decryptFileId(video.thumbnail_id);
-        } catch (err) {
-          console.error('Error decrypting thumbnail_id:', err);
-          // If decryption fails, try using the original value (might be unencrypted)
-          decryptedThumbnailId = video.thumbnail_id;
-        }
-      }
-      
-      // Delete video and thumbnail files if they exist
-      if (decryptedVideoId) {
-        try {
-          await storage.deleteFile(videosBucketId, decryptedVideoId);
-        } catch (err) {
-          console.error('Error deleting video file:', err);
-          // Continue even if file deletion fails
-        }
-      }
-      
-      if (decryptedThumbnailId) {
-        try {
-          await storage.deleteFile(thumbnailsBucketId, decryptedThumbnailId);
-        } catch (err) {
-          console.error('Error deleting thumbnail file:', err);
-          // Continue even if file deletion fails
-        }
-      }
-      
-      // Delete video document
-      await databases.deleteDocument(
-        databaseId,
-        videoCollectionId,
-        id
-      );
-      
-      // Show success message
-      setSnackbarMessage('Video successfully deleted!');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
-      
-      // Refresh videos list
-      fetchVideos();
-      
-    } catch (err) {
-      console.error('Error deleting video:', err);
-      setError('Failed to delete video. Please try again.');
-      
-      // Show error message
-      setSnackbarMessage('Failed to delete video. Please try again.');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-    } finally {
-      setLoading(false);
-      setDeleteDialogOpen(false);
-      setItemToDelete(null);
-    }
-  };
-  
-  // Save or update user
-  const handleSaveUser = async () => {
-    if (!userName || !userEmail || (!editingUser && !userPassword)) {
-      setError('Please fill all required user fields');
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const userData = {
-        name: userName,
-        email: userEmail,
-        ...(userPassword ? { password: userPassword } : {})
-      };
-      
-      if (editingUser) {
-        // Update existing user
-        await databases.updateDocument(
-          databaseId,
-          userCollectionId,
-          editingUser,
-          userData
-        );
-        
-        // Show success message
-        setSnackbarMessage('User successfully updated!');
-        setSnackbarSeverity('success');
-        setSnackbarOpen(true);
-      } else {
-        // Create new user
-        await databases.createDocument(
-          databaseId,
-          userCollectionId,
-          ID.unique(),
-          {
-            ...userData,
-            created_at: new Date().toISOString()
-          }
-        );
-        
-        // Show success message
-        setSnackbarMessage('User successfully created!');
-        setSnackbarSeverity('success');
-        setSnackbarOpen(true);
-      }
-      
-      // Reset form
-      setUserName('');
-      setUserEmail('');
-      setUserPassword('');
-      setEditingUser(null);
-      setNewUser(false);
-      
-      // Refresh users list
-      fetchUsers();
-      
-    } catch (err) {
-      console.error('Error saving user:', err);
-      setError('Failed to save user. Please try again.');
-      
-      // Show error message
-      setSnackbarMessage('Failed to save user. Please try again.');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Delete user
-  const handleDeleteUser = async (id: string) => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Delete user document
-      await databases.deleteDocument(
-        databaseId,
-        userCollectionId,
-        id
-      );
-      
-      // Show success message
-      setSnackbarMessage('User successfully deleted!');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
-      
-      // Refresh users list
-      fetchUsers();
-      
-    } catch (err) {
-      console.error('Error deleting user:', err);
-      setError('Failed to delete user. Please try again.');
-      
-      // Show error message
-      setSnackbarMessage('Failed to delete user. Please try again.');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-    } finally {
-      setLoading(false);
-      setDeleteDialogOpen(false);
-      setItemToDelete(null);
-    }
-  };
-  
-  // Edit user
-  const handleEditUser = (user: User) => {
-    setUserName(user.name);
-    setUserEmail(user.email);
-    setUserPassword(''); // Don't populate password for security
-    setEditingUser(user.$id);
-    setNewUser(true);
-  };
-  
-  // Save site configuration
-  const handleSaveSiteConfig = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Primeiro, vamos verificar quais campos existem na coleção
-      try {
-        // Se não existe configuração, vamos tentar criar com o mínimo possível
-        if (!siteConfig) {
-          // Aqui assumimos que pelo menos o atributo site_name existe
-          const newConfig = await databases.createDocument(
-            databaseId,
-            siteConfigCollectionId,
-            ID.unique(),
-            { site_name: siteName || 'Site' }
-          );
-          
-          // Atualize o ID para usar nas próximas operações
-          await fetchSiteConfig();
-        }
-        
-        // Agora vamos tentar salvar cada campo separadamente
-        // para identificar quais atributos existem
-        const fieldsToTry = [
-          { name: 'site_name', value: siteName },
-          { name: 'paypal_client_id', value: paypalClientId },
-          { name: 'paypal_me_username', value: paypalMeUsername },
-          { name: 'stripe_publishable_key', value: stripePublishableKey },
-          { name: 'stripe_secret_key', value: stripeSecretKey },
-          { name: 'telegram_username', value: telegramUsername },
-          { name: 'video_list_title', value: videoListTitle },
-        ];
-        
-        let successCount = 0;
-        let errorCount = 0;
-        let successFields: string[] = [];
-        let errorFields: string[] = [];
-        
-        // Para cada campo, tenta atualizar individualmente
-        for (const field of fieldsToTry) {
-          if (field.value !== undefined && field.value !== null) {
-            try {
-              const updateData = { [field.name]: field.value };
-              const configId = siteConfig ? siteConfig.$id : '';
-              await databases.updateDocument(
-                databaseId,
-                siteConfigCollectionId,
-                configId,
-                updateData
-              );
-              successCount++;
-              successFields.push(field.name);
-              console.log(`Campo ${field.name} salvo com sucesso.`);
-            } catch (err) {
-              errorCount++;
-              errorFields.push(field.name);
-              console.log(`Campo ${field.name} não pôde ser salvo. Atributo provavelmente não existe.`);
-              // Continue sem quebrar o processo
-            }
-          }
-        }
-        
-        // Tenta salvar crypto se houver valores
-        if (cryptoWallets && cryptoWallets.length > 0) {
-          try {
-            const configId = siteConfig ? siteConfig.$id : '';
-            await databases.updateDocument(
-              databaseId,
-              siteConfigCollectionId,
-              configId,
-              { crypto: cryptoWallets }
-            );
-            successCount++;
-            successFields.push('crypto');
-          } catch (err) {
-            console.log(`Campo crypto não pôde ser salvo. Atributo provavelmente não existe.`);
-            errorCount++;
-            errorFields.push('crypto');
-          }
-        }
-        
-        if (successCount > 0) {
-          if (errorCount > 0) {
-            showFeedback(`${successCount} campos salvos com sucesso. ${errorCount} campos não puderam ser salvos.`, 'success');
-            console.log('Campos salvos:', successFields.join(', '));
-            console.log('Campos não salvos:', errorFields.join(', '));
-            // Mostrar mensagem informativa
-            setError(`Alguns campos não puderam ser salvos porque os atributos não existem na coleção: ${errorFields.join(', ')}`);
-          } else {
-            showFeedback('Todas as configurações foram salvas com sucesso!', 'success');
-          }
-          refreshConfig(); // Update the context with new config
-          setEditingConfig(false);
-        } else {
-          setError("Nenhum campo foi salvo. Verifique se os atributos necessários existem na coleção.");
-          showFeedback('Falha ao salvar configurações', 'error');
-        }
-      } catch (err: any) {
-        console.error('Erro ao verificar/salvar configurações:', err);
-        
-        if (err.message && err.message.includes('Attribute')) {
-          setError(`Certifique-se de que pelo menos o atributo 'site_name' existe na coleção. Erro: ${err.message}`);
-        } else {
-          setError(`Erro ao salvar: ${err.message}`);
-        }
-        
-        showFeedback('Falha ao salvar configurações', 'error');
-      }
-    } catch (err: any) {
-      console.error('Erro ao salvar configurações do site:', err);
-      setError(`Erro ao salvar: ${err.message}`);
-      showFeedback('Falha ao salvar configurações do site', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Open delete confirmation dialog
-  const openDeleteDialog = (type: 'video' | 'user', id: string) => {
-    setItemToDelete({ type, id });
-    setDeleteDialogOpen(true);
-  };
-  
-  // Format video duration from seconds to MM:SS
-  const formatDuration = (seconds: number | undefined): string => {
-    if (!seconds) return '00:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-  
-  // Handle test email config
-  const handleTestEmailConfig = async () => {
-    if (!testEmailAddress) return;
-    
-    setTestingEmail(true);
-    setTestEmailResult(null);
-    
-    try {
-      // Determine API base URL based on environment
-      const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3000' : (import.meta.env.VITE_API_URL || '');
-      
-      const response = await fetch(`${API_BASE_URL}/api/test-email-config`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          testEmail: testEmailAddress
-        }),
-      });
-      
-      const result = await response.json();
-      
-      if (response.ok) {
-        setTestEmailResult({
-          success: true,
-          message: `Email de teste enviado com sucesso para ${testEmailAddress}!`
-        });
-      } else {
-        setTestEmailResult({
-          success: false,
-          message: `Erro ao enviar email: ${result.error || 'Erro desconhecido'}`
-        });
-      }
-    } catch (error) {
-      console.error('Error testing email config:', error);
-      setTestEmailResult({
-        success: false,
-        message: `Falha ao testar configuração de email: ${error instanceof Error ? error.message : 'Erro desconhecido'}`
-      });
-    } finally {
-      setTestingEmail(false);
-    }
-  };
-  
-  // Add crypto wallet
-  const handleAddCryptoWallet = () => {
-    if (!newCryptoWallet || !selectedCrypto) return;
-    
-    // Format: "BTC - Bitcoin: wallet_address"
-    const cryptoName = cryptoCurrencies.find(c => c.code === selectedCrypto)?.name || selectedCrypto;
-    const walletEntry = `${selectedCrypto} - ${cryptoName}\n${newCryptoWallet}`;
-    
-    // Check if we already have 5 wallets
-    if (cryptoWallets.length >= 5) {
-      showFeedback('Maximum of 5 crypto wallets allowed', 'error');
-      return;
-    }
-    
-    // Check if this currency already exists
-    const existingWallet = cryptoWallets.find(wallet => wallet.startsWith(selectedCrypto));
-    if (existingWallet) {
-      showFeedback(`A wallet for ${selectedCrypto} already exists`, 'error');
-      return;
-    }
-    
-    setCryptoWallets([...cryptoWallets, walletEntry]);
-    setNewCryptoWallet('');
-  };
-  
-  // Crypto wallet variables
-  const walletsFromDb = siteConfig?.crypto && Array.isArray(siteConfig.crypto) ? siteConfig.crypto : [];
-  const walletsToShow = walletsFromDb.length > 0 ? walletsFromDb : cryptoWallets;
-  const hasWallets = walletsToShow.length > 0;
-  
-  // Remove crypto wallet
-  const handleRemoveCryptoWallet = (index: number) => {
-    // Se estamos exibindo carteiras do banco de dados, atualize as carteiras do banco de dados
-    if (walletsFromDb.length > 0) {
-      const updatedWallets = [...walletsFromDb];
-      updatedWallets.splice(index, 1);
-      setCryptoWallets(updatedWallets);
-      
-      // Se não estamos no modo de edição, salve imediatamente
-      if (!editingConfig) {
-        // Salvar no banco de dados
-        if (siteConfig) {
-          databases.updateDocument(
-            databaseId,
-            siteConfigCollectionId,
-            siteConfig.$id,
-            { crypto: updatedWallets }
-          )
-          .then(() => {
-            showFeedback('Crypto wallet removed successfully', 'success');
-            refreshConfig(); // Atualizar o contexto
-            fetchSiteConfig(); // Recarregar as configurações
-          })
-          .catch((err: Error) => {
-            console.error('Error removing crypto wallet:', err);
-            showFeedback('Failed to remove crypto wallet', 'error');
-          });
-        }
-      }
-    } else {
-      // Se estamos exibindo carteiras locais, atualize apenas o estado local
-      const updatedWallets = [...cryptoWallets];
-      updatedWallets.splice(index, 1);
-      setCryptoWallets(updatedWallets);
-      
-      // Atualizar localStorage
-      localStorage.setItem('cryptoWallets', JSON.stringify(updatedWallets));
-    }
-  };
-  
   // Filter videos when search term changes
   useEffect(() => {
     if (!searchTerm.trim()) {
@@ -1145,41 +412,225 @@ const Admin: FC = () => {
       setFilteredVideos(filtered);
     }
   }, [searchTerm, videos]);
-  
-  // Initialize Appwrite schema
-  const handleInitializeSchema = async () => {
+
+  // Delete video
+  const handleDeleteVideo = async (id: string) => {
     try {
-      setInitializingSchema(true);
+      setLoading(true);
       setError(null);
       
-      await AppwriteSchemaManager.initializeSchema();
+      const success = await VideoService.deleteVideo(id);
       
-      showFeedback('Schema documentation generated. Please check the console for required attributes.', 'success');
-      
-      // Mostrar instruções mais detalhadas
-      setError('Importante: Devido a limitações do SDK Web, os atributos devem ser criados manualmente no Console do Appwrite.\n\n' +
-        'Instruções:\n' +
-        '1. Acesse o Console do Appwrite\n' +
-        '2. Vá para Database > Collections\n' +
-        '3. Para cada coleção (videos, users, site_config, sessions), adicione os atributos listados no console do navegador\n' +
-        '4. Depois de criar os atributos, você poderá salvar os dados normalmente\n\n' +
-        'Se você estiver vendo erros sobre atributos não encontrados ao salvar, significa que alguns atributos necessários ainda não foram criados.');
-      
-      // Refresh data
-      await Promise.all([
-        fetchVideos(),
-        fetchUsers(),
-        fetchSiteConfig()
-      ]);
+      if (success) {
+        showFeedback('Video successfully deleted!', 'success');
+        fetchVideos();
+      } else {
+        showFeedback('Failed to delete video', 'error');
+      }
     } catch (err) {
-      console.error('Error generating schema documentation:', err);
-      setError('Failed to generate schema documentation. Please check the console for details.');
-      showFeedback('Failed to generate schema documentation', 'error');
+      console.error('Error deleting video:', err);
+      showFeedback('Failed to delete video. Please try again.', 'error');
     } finally {
-      setInitializingSchema(false);
+      setLoading(false);
+      setDeleteDialogOpen(false);
+      setItemToDelete(null);
     }
   };
   
+  // Delete user
+  const handleDeleteUser = async (id: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const success = await jsonDatabaseService.deleteUser(id);
+      
+      if (success) {
+        showFeedback('User successfully deleted!', 'success');
+        fetchUsers();
+      } else {
+        showFeedback('Failed to delete user', 'error');
+      }
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      showFeedback('Failed to delete user. Please try again.', 'error');
+    } finally {
+      setLoading(false);
+      setDeleteDialogOpen(false);
+      setItemToDelete(null);
+    }
+  };
+
+  // Save video (create or update)
+  const handleSaveVideo = async () => {
+    try {
+      setUploading(true);
+      setError(null);
+      setUploadProgress(0);
+
+      if (!videoTitle || !videoDescription || !videoPrice) {
+        showFeedback('Please fill in all required fields', 'error');
+        return;
+      }
+
+      const price = parseFloat(videoPrice);
+      if (isNaN(price) || price < 0) {
+        showFeedback('Please enter a valid price', 'error');
+        return;
+      }
+
+      let videoFileId = '';
+      let thumbnailFileId = '';
+
+      // Se estiver editando, carregar dados existentes primeiro
+      if (editingVideo) {
+        const existingVideo = videos.find(v => v.$id === editingVideo);
+        if (existingVideo) {
+          // Preservar IDs existentes se não houver novos arquivos
+          videoFileId = existingVideo.video_id || existingVideo.videoFileId || '';
+          thumbnailFileId = existingVideo.thumbnail_id || existingVideo.thumbnailFileId || '';
+        }
+      }
+
+      // Upload video file if provided (apenas se houver novo arquivo)
+      if (videoFile) {
+        setUploadProgress(20);
+        const videoResult = await wasabiService.uploadFile(videoFile, 'videos');
+        if (!videoResult.success) {
+          showFeedback('Failed to upload video file', 'error');
+          return;
+        }
+        videoFileId = videoResult.fileId;
+        setUploadProgress(60);
+      }
+
+      // Upload thumbnail if provided (apenas se houver novo arquivo)
+      if (thumbnailFile) {
+        const thumbnailResult = await wasabiService.uploadFile(thumbnailFile, 'thumbnails');
+        if (!thumbnailResult.success) {
+          showFeedback('Failed to upload thumbnail', 'error');
+          return;
+        }
+        thumbnailFileId = thumbnailResult.fileId;
+        setUploadProgress(80);
+      }
+
+      // Preparar dados para atualização
+      const videoData: any = {
+        title: videoTitle,
+        description: videoDescription,
+        price: price,
+        productLink: productLink || undefined,
+        isActive: true
+      };
+
+      // Adicionar duração se fornecida ou se for novo vídeo
+      if (videoDuration) {
+        videoData.duration = `${Math.floor(videoDuration / 60)}:${(videoDuration % 60).toString().padStart(2, '0')}`;
+      } else if (!editingVideo) {
+        videoData.duration = '00:00';
+      }
+
+      // Adicionar IDs de arquivos apenas se foram fornecidos
+      if (videoFileId) {
+        videoData.videoFileId = videoFileId;
+        videoData.video_id = videoFileId; // Para compatibilidade
+      }
+      
+      if (thumbnailFileId) {
+        videoData.thumbnailFileId = thumbnailFileId;
+        videoData.thumbnail_id = thumbnailFileId; // Para compatibilidade
+      }
+
+      setUploadProgress(90);
+
+      if (editingVideo) {
+        // Update existing video
+        const updatedVideo = await jsonDatabaseService.updateVideo(editingVideo, videoData);
+        if (updatedVideo) {
+          showFeedback('Video updated successfully!', 'success');
+          fetchVideos();
+          setShowVideoForm(false);
+          setEditingVideo(null);
+        } else {
+          showFeedback('Failed to update video', 'error');
+        }
+      } else {
+        // Create new video
+        const newVideo = await jsonDatabaseService.createVideo(videoData);
+        if (newVideo) {
+          showFeedback('Video uploaded successfully!', 'success');
+          fetchVideos();
+          setShowVideoForm(false);
+        } else {
+          showFeedback('Failed to create video', 'error');
+        }
+      }
+
+      setUploadProgress(100);
+
+      // Reset form
+      setVideoTitle('');
+      setVideoDescription('');
+      setVideoPrice('');
+      setProductLink('');
+      setVideoFile(null);
+      setThumbnailFile(null);
+      setVideoDuration(null);
+
+    } catch (err) {
+      console.error('Error saving video:', err);
+      showFeedback('Failed to save video. Please try again.', 'error');
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
+  // Save site configuration
+  const handleSaveConfig = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const configData = {
+        siteName: siteName,
+        paypalClientId: paypalClientId,
+        paypalMeUsername: paypalMeUsername,
+        stripePublishableKey: stripePublishableKey,
+        stripeSecretKey: stripeSecretKey,
+        telegramUsername: telegramUsername,
+        videoListTitle: videoListTitle,
+        crypto: cryptoWallets,
+        emailHost: emailHost,
+        emailPort: emailPort,
+        emailSecure: emailSecure,
+        emailUser: emailUser,
+        emailPass: emailPass,
+        emailFrom: emailFrom,
+        wasabiConfig: {
+          accessKey: wasabiAccessKey,
+          secretKey: wasabiSecretKey,
+          region: wasabiRegion,
+          bucket: wasabiBucket,
+          endpoint: wasabiEndpoint
+        }
+      };
+
+      await jsonDatabaseService.updateSiteConfig(configData);
+      
+      showFeedback('Configuration saved successfully!', 'success');
+      setEditingConfig(false);
+      fetchSiteConfig();
+      
+    } catch (err) {
+      console.error('Error saving configuration:', err);
+      showFeedback('Failed to save configuration. Please try again.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Paper elevation={3} sx={{ mb: 4 }}>
@@ -1203,17 +654,10 @@ const Admin: FC = () => {
                 <Button
                   variant="contained"
                   color="primary"
-                  startIcon={editingVideo ? <CancelIcon /> : showVideoForm ? <AddIcon /> : <AddIcon />}
-                  onClick={() => {
-                    if (editingVideo) {
-                      resetVideoForm();
-                      setShowVideoForm(false);
-                    } else {
-                      setShowVideoForm(!showVideoForm);
-                    }
-                  }}
+                  startIcon={<AddIcon />}
+                  onClick={() => setShowVideoForm(!showVideoForm)}
                 >
-                  {editingVideo ? 'Cancel Edit' : showVideoForm ? 'Hide Form' : 'Upload New Video'}
+                  {showVideoForm ? 'Hide Form' : 'Upload New Video'}
                 </Button>
               </Grid>
             </Grid>
@@ -1223,131 +667,6 @@ const Admin: FC = () => {
                 {error}
               </Alert>
             )}
-            
-            <Collapse in={showVideoForm}>
-              <Card sx={{ mt: 2, mb: 3 }}>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    {editingVideo ? 'Edit Video' : 'Upload New Video'}
-                  </Typography>
-                  <Divider sx={{ mb: 2 }} />
-                  
-                  <Box component="form">
-                    <Grid container spacing={2}>
-                      <Grid item xs={12} md={6}>
-                        <TextField
-                          fullWidth
-                          label="Title"
-                          value={videoTitle}
-                          onChange={(e) => setVideoTitle(e.target.value)}
-                          required
-                        />
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <TextField
-                          fullWidth
-                          label="Price"
-                          type="number"
-                          value={videoPrice}
-                          onChange={(e) => setVideoPrice(e.target.value)}
-                          InputProps={{
-                            startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                          }}
-                          required
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          label="Description"
-                          multiline
-                          rows={3}
-                          value={videoDescription}
-                          onChange={(e) => setVideoDescription(e.target.value)}
-                          required
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          label="Product Link"
-                          placeholder="https://example.com/product"
-                          value={productLink}
-                          onChange={(e) => setProductLink(e.target.value)}
-                          required
-                          helperText="Link to the product or payment page"
-                        />
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <Button
-                          fullWidth
-                          component="label"
-                          variant="outlined"
-                          startIcon={<CloudUploadIcon />}
-                        >
-                          {editingVideo ? 'Replace Video' : 'Upload Video'}
-                          <VisuallyHiddenInput 
-                            type="file" 
-                            accept="video/*" 
-                            onChange={handleVideoFileChange}
-                          />
-                        </Button>
-                        {videoFile && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            Video: {videoFile.name} {videoDuration ? `(Duration: ${formatDuration(videoDuration)})` : ''}
-                          </Typography>
-                        )}
-                        {editingVideo && !videoFile && (
-                          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                            Leave empty to keep the current video
-                          </Typography>
-                        )}
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <Button
-                          fullWidth
-                          component="label"
-                          variant="outlined"
-                          startIcon={<CloudUploadIcon />}
-                        >
-                          {editingVideo ? 'Replace Thumbnail' : 'Upload Thumbnail'}
-                          <VisuallyHiddenInput 
-                            type="file" 
-                            accept="image/*" 
-                            onChange={handleThumbnailFileChange}
-                          />
-                        </Button>
-                        {thumbnailFile && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            Thumbnail: {thumbnailFile.name}
-                          </Typography>
-                        )}
-                        {editingVideo && !thumbnailFile && (
-                          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                            Leave empty to keep the current thumbnail
-                          </Typography>
-                        )}
-                      </Grid>
-                      <Grid item xs={12}>
-                        <Button
-                          variant="contained"
-                          color="primary"
-                          onClick={handleVideoUpload}
-                          disabled={
-                            (!editingVideo && (!videoFile || !thumbnailFile || !videoTitle || !videoDescription || !videoPrice || !videoDuration || !productLink)) ||
-                            (editingVideo && (!videoTitle || !videoDescription || !videoPrice || !productLink)) ||
-                            uploading
-                          }
-                          startIcon={uploading ? <CircularProgress size={24} color="inherit" /> : <SaveIcon />}
-                        >
-                          {uploading ? 'Saving...' : editingVideo ? 'Update Video' : 'Upload Video'}
-                        </Button>
-                      </Grid>
-                    </Grid>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Collapse>
           </Box>
           
           {loading && !error ? (
@@ -1387,12 +706,20 @@ const Admin: FC = () => {
                       <TableRow key={video.$id}>
                         <TableCell>{video.title}</TableCell>
                         <TableCell>${video.price}</TableCell>
-                        <TableCell>{formatDuration(video.duration)}</TableCell>
+                        <TableCell>{video.duration ? `${Math.floor(video.duration / 60)}:${(video.duration % 60).toString().padStart(2, '0')}` : '00:00'}</TableCell>
                         <TableCell>{video.is_active ? 'Active' : 'Inactive'}</TableCell>
                         <TableCell>
                           <IconButton 
                             color="primary" 
-                            onClick={() => handleEditVideo(video)}
+                            onClick={() => {
+                              setVideoTitle(video.title);
+                              setVideoDescription(video.description);
+                              setVideoPrice(video.price.toString());
+                              setProductLink(video.product_link || '');
+                              setVideoDuration(video.duration || null);
+                              setEditingVideo(video.$id);
+                              setShowVideoForm(true);
+                            }}
                             aria-label="edit video"
                             size="small"
                             sx={{ mr: 1 }}
@@ -1401,7 +728,10 @@ const Admin: FC = () => {
                           </IconButton>
                           <IconButton 
                             color="error" 
-                            onClick={() => openDeleteDialog('video', video.$id)}
+                            onClick={() => {
+                              setItemToDelete({ type: 'video', id: video.$id });
+                              setDeleteDialogOpen(true);
+                            }}
                             aria-label="delete video"
                           >
                             <DeleteIcon />
@@ -1421,6 +751,145 @@ const Admin: FC = () => {
               </TableContainer>
             </>
           )}
+          
+          {/* Video Form */}
+          {showVideoForm && (
+            <Paper sx={{ p: 3, mt: 3 }}>
+              <Typography variant="h6" component="h3" sx={{ mb: 3 }}>
+                {editingVideo ? 'Edit Video' : 'Upload New Video'}
+              </Typography>
+              
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="Video Title"
+                    value={videoTitle}
+                    onChange={(e) => setVideoTitle(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                  
+                  <TextField
+                    fullWidth
+                    label="Description"
+                    value={videoDescription}
+                    onChange={(e) => setVideoDescription(e.target.value)}
+                    variant="outlined"
+                    multiline
+                    rows={3}
+                    sx={{ mb: 2 }}
+                  />
+                  
+                  <TextField
+                    fullWidth
+                    label="Price (USD)"
+                    type="number"
+                    value={videoPrice}
+                    onChange={(e) => setVideoPrice(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                  
+                  <TextField
+                    fullWidth
+                    label="Product Link (optional)"
+                    value={productLink}
+                    onChange={(e) => setProductLink(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                </Grid>
+                
+                <Grid item xs={12} md={6}>
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      Video File
+                    </Typography>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setVideoFile(file);
+                          // Get video duration
+                          const video = document.createElement('video');
+                          video.preload = 'metadata';
+                          video.onloadedmetadata = () => {
+                            setVideoDuration(video.duration);
+                          };
+                          video.src = URL.createObjectURL(file);
+                        }
+                      }}
+                      style={{ width: '100%' }}
+                    />
+                  </Box>
+                  
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      Thumbnail Image
+                    </Typography>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setThumbnailFile(file);
+                        }
+                      }}
+                      style={{ width: '100%' }}
+                    />
+                  </Box>
+                  
+                  {videoDuration && (
+                    <Typography variant="body2" color="text.secondary">
+                      Duration: {Math.floor(videoDuration / 60)}:{(videoDuration % 60).toString().padStart(2, '0')}
+                    </Typography>
+                  )}
+                </Grid>
+              </Grid>
+              
+              <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={handleSaveVideo}
+                  disabled={uploading || !videoTitle || !videoDescription || !videoPrice}
+                  startIcon={uploading ? <CircularProgress size={20} /> : <SaveIcon />}
+                >
+                  {uploading ? 'Uploading...' : (editingVideo ? 'Update Video' : 'Upload Video')}
+                </Button>
+                
+                <Button
+                  variant="outlined"
+                  onClick={() => {
+                    setShowVideoForm(false);
+                    setEditingVideo(null);
+                    setVideoTitle('');
+                    setVideoDescription('');
+                    setVideoPrice('');
+                    setProductLink('');
+                    setVideoFile(null);
+                    setThumbnailFile(null);
+                    setVideoDuration(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </Box>
+              
+              {uploadProgress > 0 && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Upload Progress: {uploadProgress}%
+                  </Typography>
+                  <LinearProgress variant="determinate" value={uploadProgress} />
+                </Box>
+              )}
+            </Paper>
+          )}
         </TabPanel>
         
         {/* Site Configuration & Users Tab */}
@@ -1433,27 +902,14 @@ const Admin: FC = () => {
                 </Typography>
               </Grid>
               <Grid item>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  {/* Botão para inicializar o schema do banco de dados */}
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    onClick={handleInitializeSchema}
-                    disabled={initializingSchema}
-                    startIcon={initializingSchema ? <CircularProgress size={20} color="inherit" /> : <SettingsIcon />}
-                  >
-                    {initializingSchema ? 'Initializing...' : 'Initialize Schema'}
-                  </Button>
-                  
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={() => setEditingConfig(!editingConfig)}
-                    startIcon={editingConfig ? <CancelIcon /> : <EditIcon />}
-                  >
-                    {editingConfig ? 'Cancel Edit' : 'Edit Config'}
-                  </Button>
-                </Box>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={() => setEditingConfig(!editingConfig)}
+                  startIcon={editingConfig ? <CancelIcon /> : <EditIcon />}
+                >
+                  {editingConfig ? 'Cancel Edit' : 'Edit Config'}
+                </Button>
               </Grid>
             </Grid>
 
@@ -1462,45 +918,70 @@ const Admin: FC = () => {
                 {error}
               </Alert>
             )}
+          </Box>
 
-            {/* Site Configuration Section */}
-            <Paper elevation={2} sx={{ p: 3, mb: 4 }}>
-              {editingConfig ? (
-                <Box component="form">
+          {/* Site Configuration Form */}
+          {editingConfig && (
+            <Paper sx={{ p: 3, mb: 3 }}>
+              <Typography variant="h6" component="h3" sx={{ mb: 3 }}>
+                Site Settings
+              </Typography>
+              
+              <Grid container spacing={3}>
+                {/* Basic Site Info */}
+                <Grid item xs={12} md={6}>
                   <TextField
                     fullWidth
-                    margin="normal"
                     label="Site Name"
                     value={siteName}
                     onChange={(e) => setSiteName(e.target.value)}
-                    required
+                    variant="outlined"
+                    sx={{ mb: 2 }}
                   />
                   
                   <TextField
                     fullWidth
-                    margin="normal"
                     label="Video List Title"
                     value={videoListTitle}
                     onChange={(e) => setVideoListTitle(e.target.value)}
-                    helperText="Title shown on the video listing page"
+                    variant="outlined"
+                    sx={{ mb: 2 }}
                   />
                   
                   <TextField
                     fullWidth
-                    margin="normal"
+                    label="Telegram Username"
+                    value={telegramUsername}
+                    onChange={(e) => setTelegramUsername(e.target.value)}
+                    variant="outlined"
+                    placeholder="@username"
+                    sx={{ mb: 2 }}
+                  />
+                </Grid>
+
+                {/* Payment Settings */}
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>
+                    Payment Settings
+                  </Typography>
+                  
+                  <TextField
+                    fullWidth
                     label="PayPal Client ID"
                     value={paypalClientId}
                     onChange={(e) => setPaypalClientId(e.target.value)}
-                    helperText="For traditional PayPal integration (starts with 'A')"
+                    variant="outlined"
+                    sx={{ mb: 2 }}
                   />
                   
                   <TextField
                     fullWidth
-                    margin="normal"
                     label="PayPal.me Username"
                     value={paypalMeUsername}
                     onChange={(e) => setPaypalMeUsername(e.target.value)}
-                    helperText="Your PayPal.me username (e.g., 'yourusername' for paypal.me/yourusername)"
+                    variant="outlined"
+                    placeholder="@username"
+                    sx={{ mb: 2 }}
                   />
                   
                   <TextField
@@ -1508,371 +989,287 @@ const Admin: FC = () => {
                     label="Stripe Publishable Key"
                     value={stripePublishableKey}
                     onChange={(e) => setStripePublishableKey(e.target.value)}
-                    margin="normal"
-                    disabled={!editingConfig}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
                   />
                   
                   <TextField
                     fullWidth
                     label="Stripe Secret Key"
+                    type="password"
                     value={stripeSecretKey}
                     onChange={(e) => setStripeSecretKey(e.target.value)}
-                    margin="normal"
-                    disabled={!editingConfig}
-                    type="password"
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                </Grid>
+
+                {/* Email Settings */}
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>
+                    Email Settings
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    label="SMTP Host"
+                    value={emailHost}
+                    onChange={(e) => setEmailHost(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
                   />
                   
                   <TextField
                     fullWidth
-                    margin="normal"
-                    label="Telegram Username (without @)"
-                    value={telegramUsername}
-                    onChange={(e) => setTelegramUsername(e.target.value)}
+                    label="SMTP Port"
+                    value={emailPort}
+                    onChange={(e) => setEmailPort(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
                   />
                   
-                  <Typography variant="h6" sx={{ mt: 3, mb: 1 }}>
-                    Crypto Wallets
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={emailSecure}
+                        onChange={(e) => setEmailSecure(e.target.checked)}
+                      />
+                    }
+                    label="Use SSL/TLS"
+                    sx={{ mb: 2 }}
+                  />
+                </Grid>
+                
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    label="Email Username"
+                    value={emailUser}
+                    onChange={(e) => setEmailUser(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                  
+                  <TextField
+                    fullWidth
+                    label="Email Password"
+                    type="password"
+                    value={emailPass}
+                    onChange={(e) => setEmailPass(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                </Grid>
+                
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    fullWidth
+                    label="From Email"
+                    value={emailFrom}
+                    onChange={(e) => setEmailFrom(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                </Grid>
+
+                {/* Wasabi Settings */}
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>
+                    Wasabi Storage Settings
                   </Typography>
-                  <Box sx={{ mb: 2 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      Add up to 5 cryptocurrency wallets for payment
-                    </Typography>
-                    <Alert severity="info" sx={{ mt: 1, mb: 1 }} variant="outlined">
-                      <Typography variant="caption">
-                        Note: If you're seeing errors about the "crypto" attribute, please make sure it's correctly 
-                        configured in your Appwrite database. Your wallets will be saved locally in the meantime.
-                      </Typography>
-                    </Alert>
-                  </Box>
+                </Grid>
+                
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="Access Key"
+                    value={wasabiAccessKey}
+                    onChange={(e) => setWasabiAccessKey(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
                   
-                  <Box sx={{ mb: 2 }}>
-                    {cryptoWallets.map((wallet, index) => {
-                      const [header, address] = wallet.split('\n');
-                      return (
-                        <Paper key={index} variant="outlined" sx={{ p: 1, mb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Box>
-                            <Typography variant="subtitle2">{header}</Typography>
-                            <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>{address}</Typography>
-                          </Box>
-                          <IconButton 
-                            color="error" 
-                            onClick={() => {
-                              // Se as carteiras estão vindo do banco de dados, precisamos atualizar o estado local primeiro
-                              if (walletsFromDb.length > 0) {
-                                const updatedWallets = [...walletsFromDb];
-                                updatedWallets.splice(index, 1);
-                                setCryptoWallets(updatedWallets);
-                                
-                                // Salvar imediatamente no banco de dados
-                                handleSaveSiteConfig();
-                              } else {
-                                // Se são carteiras locais, apenas remover do estado
-                                handleRemoveCryptoWallet(index);
-                              }
-                            }}
-                            size="small"
-                            aria-label="remove wallet"
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Paper>
-                      );
-                    })}
+                  <TextField
+                    fullWidth
+                    label="Secret Key"
+                    type="password"
+                    value={wasabiSecretKey}
+                    onChange={(e) => setWasabiSecretKey(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                  
+                  <TextField
+                    fullWidth
+                    label="Region"
+                    value={wasabiRegion}
+                    onChange={(e) => setWasabiRegion(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                </Grid>
+                
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="Bucket Name"
+                    value={wasabiBucket}
+                    onChange={(e) => setWasabiBucket(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                  
+                  <TextField
+                    fullWidth
+                    label="Endpoint"
+                    value={wasabiEndpoint}
+                    onChange={(e) => setWasabiEndpoint(e.target.value)}
+                    variant="outlined"
+                    sx={{ mb: 2 }}
+                  />
+                </Grid>
+
+                {/* Crypto Wallets */}
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>
+                    Cryptocurrency Wallets
+                  </Typography>
+                  
+                  <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                    <FormControl sx={{ minWidth: 120 }}>
+                      <InputLabel>Crypto</InputLabel>
+                      <Select
+                        value={selectedCrypto}
+                        onChange={(e) => setSelectedCrypto(e.target.value)}
+                        label="Crypto"
+                      >
+                        {cryptoCurrencies.map((crypto) => (
+                          <MenuItem key={crypto.code} value={crypto.code}>
+                            {crypto.name} ({crypto.code})
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
                     
-                    {cryptoWallets.length === 0 && (
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        No crypto wallets added yet
-                      </Typography>
-                    )}
-                  </Box>
-                  
-                  {cryptoWallets.length < 5 && (
-                    <Grid container spacing={2} alignItems="center">
-                      <Grid item xs={12} sm={4}>
-                        <FormControl fullWidth>
-                          <InputLabel id="crypto-select-label">Cryptocurrency</InputLabel>
-                          <Select
-                            labelId="crypto-select-label"
-                            value={selectedCrypto}
-                            label="Cryptocurrency"
-                            onChange={(e) => setSelectedCrypto(e.target.value)}
-                          >
-                            {cryptoCurrencies.map((crypto) => (
-                              <MenuItem key={crypto.code} value={crypto.code}>
-                                {crypto.code} - {crypto.name}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label="Wallet Address"
-                          value={newCryptoWallet}
-                          onChange={(e) => setNewCryptoWallet(e.target.value)}
-                          placeholder="Enter wallet address"
-                        />
-                      </Grid>
-                      <Grid item xs={12} sm={2}>
-                        <Button
-                          variant="contained"
-                          color="primary"
-                          onClick={handleAddCryptoWallet}
-                          fullWidth
-                        >
-                          Add
-                        </Button>
-                      </Grid>
-                    </Grid>
-                  )}
-                  
-                  <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
-                    <Button
-                      variant="contained"
-                      color="primary"
-                      onClick={handleSaveSiteConfig}
-                      disabled={loading}
-                      startIcon={<SaveIcon />}
-                    >
-                      Save
-                    </Button>
+                    <TextField
+                      label="Wallet Address"
+                      value={newCryptoWallet}
+                      onChange={(e) => setNewCryptoWallet(e.target.value)}
+                      variant="outlined"
+                      sx={{ flexGrow: 1 }}
+                    />
                     
                     <Button
                       variant="outlined"
                       onClick={() => {
-                        setEditingConfig(false);
-                        if (siteConfig) {
-                          setSiteName(siteConfig.site_name);
-                          setPaypalClientId(siteConfig.paypal_client_id);
-                          setStripePublishableKey(siteConfig.stripe_publishable_key || '');
-                          setStripeSecretKey(siteConfig.stripe_secret_key || '');
-                          setTelegramUsername(siteConfig.telegram_username);
-                          setVideoListTitle(siteConfig.video_list_title || 'Available Videos');
+                        if (newCryptoWallet.trim()) {
+                          setCryptoWallets([...cryptoWallets, `${selectedCrypto}:${newCryptoWallet}`]);
+                          setNewCryptoWallet('');
                         }
                       }}
-                      startIcon={<CancelIcon />}
                     >
-                      Cancel
+                      Add
                     </Button>
                   </Box>
-                </Box>
-              ) : (
-                <Box>
-                  <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                    <Typography variant="subtitle1" gutterBottom>
-                      <strong>Site Name:</strong> {siteConfig?.site_name || 'Not set'}
-                    </Typography>
-                    
-                    <Typography variant="subtitle1" gutterBottom>
-                      <strong>PayPal Client ID:</strong> {siteConfig?.paypal_client_id || 'Not set'}
-                    </Typography>
-                    
-                    <Typography variant="subtitle1">
-                      <strong>Stripe Publishable Key:</strong> {siteConfig?.stripe_publishable_key || 'Not set'}
-                    </Typography>
-                    
-                    <Typography variant="subtitle1">
-                      <strong>Stripe Secret Key:</strong> {siteConfig?.stripe_secret_key ? '•••••••••••••••••••••' : 'Not set'}
-                    </Typography>
-                    
-                    <Typography variant="subtitle1">
-                      <strong>Telegram Username:</strong> {siteConfig?.telegram_username ? `@${siteConfig.telegram_username}` : 'Not set'}
-                    </Typography>
-                    
-                    <Typography variant="subtitle1" gutterBottom>
-                      <strong>Video List Title:</strong> {siteConfig?.video_list_title || 'Not set'}
-                    </Typography>
-                    
-                    <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
-                      <strong>Crypto Wallets:</strong>
-                    </Typography>
-                    
-                    {hasWallets ? (
-                      <Box sx={{ mt: 1 }}>
-                        {walletsToShow.map((wallet, index) => {
-                          const [header, address] = wallet.split('\n');
-                          return (
-                            <Paper key={index} variant="outlined" sx={{ p: 1, mb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <Box>
-                                <Typography variant="subtitle2">{header}</Typography>
-                                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>{address}</Typography>
-                              </Box>
-                              <IconButton 
-                                color="error" 
-                                onClick={() => handleRemoveCryptoWallet(index)}
-                                size="small"
-                                aria-label="remove wallet"
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Paper>
-                          );
-                        })}
-                        {walletsFromDb.length === 0 && cryptoWallets.length > 0 && (
-                          <Alert severity="info" variant="outlined" sx={{ mt: 1 }}>
-                            <Typography variant="caption">
-                              These wallets are currently stored in your browser only.
-                            </Typography>
-                          </Alert>
-                        )}
-                      </Box>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">
-                        No crypto wallets configured
-                      </Typography>
-                    )}
-                  </Paper>
-                </Box>
-              )}
-            </Paper>
-
-            {/* New User Management Section */}
-            <Box sx={{ mt: 6, mb: 4 }}>
-              <Grid container spacing={2} alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
-                <Grid item>
-                  <Typography variant="h5" component="h2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <GroupIcon /> User Management
-                  </Typography>
-                </Grid>
-                <Grid item>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={newUser ? <CancelIcon /> : <AddIcon />}
-                    onClick={() => {
-                      if (newUser) {
-                        setNewUser(false);
-                        setUserName('');
-                        setUserEmail('');
-                        setUserPassword('');
-                        setEditingUser(null);
-                      } else {
-                        setNewUser(true);
-                      }
-                    }}
-                  >
-                    {newUser ? 'Cancel' : 'Add Admin User'}
-                  </Button>
+                  
+                  {cryptoWallets.length > 0 && (
+                    <Box>
+                      {cryptoWallets.map((wallet, index) => (
+                        <Chip
+                          key={index}
+                          label={wallet}
+                          onDelete={() => {
+                            setCryptoWallets(cryptoWallets.filter((_, i) => i !== index));
+                          }}
+                          sx={{ mr: 1, mb: 1 }}
+                        />
+                      ))}
+                    </Box>
+                  )}
                 </Grid>
               </Grid>
+              
+              <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={handleSaveConfig}
+                  startIcon={<SaveIcon />}
+                >
+                  Save Configuration
+                </Button>
+                
+                <Button
+                  variant="outlined"
+                  onClick={() => {
+                    setEditingConfig(false);
+                    fetchSiteConfig();
+                  }}
+                >
+                  Cancel
+                </Button>
+              </Box>
+            </Paper>
+          )}
 
-              {/* User form for creating/editing admin users */}
-              <Collapse in={newUser}>
-                <Paper elevation={2} sx={{ p: 3, mb: 4 }}>
-                  <Typography variant="h6" gutterBottom>
-                    {editingUser ? 'Edit Admin User' : 'Create Admin User'}
+          {/* Display Current Configuration */}
+          {!editingConfig && siteConfig && (
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" component="h3" sx={{ mb: 3 }}>
+                Current Configuration
+              </Typography>
+              
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Site Name
                   </Typography>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} md={6}>
-                      <TextField
-                        fullWidth
-                        label="Email"
-                        type="email"
-                        value={userEmail}
-                        onChange={(e) => setUserEmail(e.target.value)}
-                        required
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                      <TextField
-                        fullWidth
-                        label="Name"
-                        value={userName}
-                        onChange={(e) => setUserName(e.target.value)}
-                        required
-                      />
-                    </Grid>
-                    <Grid item xs={12}>
-                      <TextField
-                        fullWidth
-                        label={editingUser ? "New Password (leave empty to keep current)" : "Password"}
-                        type="password"
-                        value={userPassword}
-                        onChange={(e) => setUserPassword(e.target.value)}
-                        required={!editingUser}
-                      />
-                    </Grid>
-                    <Grid item xs={12}>
-                      <Button
-                        variant="contained"
-                        color="primary"
-                        onClick={handleSaveUser}
-                        disabled={loading || (!userEmail) || (!userName) || (!userPassword && !editingUser)}
-                        startIcon={loading ? <CircularProgress size={24} color="inherit" /> : <SaveIcon />}
-                      >
-                        {loading ? 'Saving...' : editingUser ? 'Update User' : 'Create User'}
-                      </Button>
-                    </Grid>
-                  </Grid>
-                </Paper>
-              </Collapse>
-
-              {/* User List */}
-              <TableContainer component={Paper}>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Email</TableCell>
-                      <TableCell>Name</TableCell>
-                      <TableCell>Created At</TableCell>
-                      <TableCell>Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {users.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={4} align="center">No users found</TableCell>
-                      </TableRow>
-                    ) : (
-                      users.map((user) => (
-                        <TableRow key={user.$id}>
-                          <TableCell>{user.email}</TableCell>
-                          <TableCell>{user.name}</TableCell>
-                          <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
-                          <TableCell>
-                            <Tooltip title="Edit User">
-                              <IconButton
-                                color="primary"
-                                onClick={() => handleEditUser(user)}
-                                size="small"
-                              >
-                                <EditIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Reset Password">
-                              <IconButton
-                                color="secondary"
-                                onClick={() => {
-                                  setUserEmail(user.email);
-                                  setUserName(user.name);
-                                  setUserPassword('');
-                                  setEditingUser(user.$id);
-                                  setNewUser(true);
-                                }}
-                                size="small"
-                              >
-                                <SecurityIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Delete User">
-                              <IconButton
-                                color="error"
-                                onClick={() => openDeleteDialog('user', user.$id)}
-                                size="small"
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Box>
-          </Box>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {siteConfig.site_name || 'Not set'}
+                  </Typography>
+                  
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Video List Title
+                  </Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {siteConfig.video_list_title || 'Not set'}
+                  </Typography>
+                  
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Telegram Username
+                  </Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {siteConfig.telegram_username || 'Not set'}
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    PayPal Client ID
+                  </Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {siteConfig.paypal_client_id ? '***' + siteConfig.paypal_client_id.slice(-4) : 'Not set'}
+                  </Typography>
+                  
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Stripe Publishable Key
+                  </Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {siteConfig.stripe_publishable_key ? '***' + siteConfig.stripe_publishable_key.slice(-4) : 'Not set'}
+                  </Typography>
+                  
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Wasabi Bucket
+                  </Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {siteConfig.wasabi_config?.bucket || 'Not set'}
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Paper>
+          )}
         </TabPanel>
       </Paper>
       
@@ -1932,11 +1329,8 @@ export default Admin;
 
 // Helper function to show feedback via snackbar
 function showFeedback(message: string, severity: 'success' | 'error') {
-  // Access snackbar state from component scope
-  // This is a workaround since the function is defined outside the component
   const event = new CustomEvent('show-feedback', {
     detail: { message, severity }
   });
   document.dispatchEvent(event);
 }
-
