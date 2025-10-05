@@ -4,14 +4,14 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardMedia from '@mui/material/CardMedia';
 import Typography from '@mui/material/Typography';
-import { Chip, CircularProgress } from '@mui/material';
+import { Chip, CircularProgress, Button } from '@mui/material';
 import Box from '@mui/material/Box';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import LockIcon from '@mui/icons-material/Lock';
+import TelegramIcon from '@mui/icons-material/Telegram';
 import Skeleton from '@mui/material/Skeleton';
 import { VideoService } from '../services/VideoService';
+import { useSiteConfig } from '../context/SiteConfigContext';
 
 interface VideoCardProps {
   video: {
@@ -33,6 +33,7 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isThumbnailLoading, setIsThumbnailLoading] = useState(true);
   const [thumbnailError, setThumbnailError] = useState(false);
+  const { telegramUsername } = useSiteConfig();
   
   const handleCardClick = async () => {
     try {
@@ -124,6 +125,20 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
   const handleThumbnailError = () => {
     setIsThumbnailLoading(false);
     setThumbnailError(true);
+  };
+
+  const handlePreviewClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate(`/video/${video.$id}`);
+  };
+
+  const handleTelegramClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const msg = `Hi, I'm interested in this video.\n\nTitle: ${video.title}\nPrice: $${video.price.toFixed(2)}\nID: ${video.$id}\n\nPlease let me know how to proceed with payment.`;
+    const encoded = encodeURIComponent(msg);
+    const base = telegramUsername ? `https://t.me/${telegramUsername.replace('@', '')}` : 'https://t.me/share/url';
+    const url = telegramUsername ? `${base}?start=0&text=${encoded}` : `${base}?text=${encoded}`;
+    window.open(url, '_blank');
   };
 
   return (
@@ -283,7 +298,7 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
           }}
         />
         
-        {/* Hover overlay */}
+        {/* Hover overlay without central play/lock icon */}
         <Box
           sx={{
             position: 'absolute',
@@ -291,35 +306,11 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
             left: 0,
             width: '100%',
             height: '100%',
-            background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.3) 50%, rgba(0,0,0,0.3) 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            background: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.25) 50%, rgba(0,0,0,0.25) 100%)',
             opacity: isHovered ? 1 : 0.4,
             transition: 'all 0.3s ease',
           }}
-        >
-          <Box
-            sx={{
-              width: '70px',
-              height: '70px',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(255,15,80,0.7)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transform: isHovered ? 'scale(1.1)' : 'scale(0.9)',
-              transition: 'all 0.3s ease',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-            }}
-          >
-            {video.isPurchased ? (
-              <PlayArrowIcon sx={{ fontSize: 45, color: 'white' }} />
-            ) : (
-              <LockIcon sx={{ fontSize: 35, color: 'white' }} />
-            )}
-          </Box>
-        </Box>
+        />
         
         {/* Duration badge */}
         {video.duration && (
@@ -425,6 +416,28 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
           >
             ${video.price.toFixed(2)}
           </Typography>
+        </Box>
+
+        {/* Actions: Preview and Telegram */}
+        <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+          <Button
+            variant="contained"
+            color="primary"
+            fullWidth
+            startIcon={<VisibilityIcon />}
+            onClick={handlePreviewClick}
+          >
+            Preview
+          </Button>
+          <Button
+            variant="outlined"
+            color="primary"
+            fullWidth
+            startIcon={<TelegramIcon />}
+            onClick={handleTelegramClick}
+          >
+            Telegram
+          </Button>
         </Box>
       </CardContent>
       </Card>

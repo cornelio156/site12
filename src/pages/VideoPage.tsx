@@ -118,8 +118,14 @@ const VideoPage: FC = () => {
   };
 
   const handleTelegramRedirect = () => {
-    if (telegramUsername && video) {
-      window.open(`https://t.me/${telegramUsername}?start=${video.$id}`, '_blank');
+    if (!video) return;
+    const message = `Hi, I'm interested in this video.\n\nTitle: ${video.title}\nPrice: $${video.price.toFixed(2)}\nID: ${video.$id}\n\nPlease let me know how to proceed with payment.`;
+    const encoded = encodeURIComponent(message);
+    if (telegramUsername) {
+      const base = `https://t.me/${telegramUsername.replace('@', '')}`;
+      window.open(`${base}?start=0&text=${encoded}`, '_blank');
+    } else {
+      window.open(`https://t.me/share/url?text=${encoded}`, '_blank');
     }
   };
 

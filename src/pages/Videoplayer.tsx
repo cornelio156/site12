@@ -178,8 +178,18 @@ const VideoPlayer: FC = () => {
   }, [video?.product_link]);
 
   const handleTelegramRedirect = () => {
+    if (!video) {
+      if (telegramUsername) {
+        window.open(`https://t.me/${telegramUsername.replace('@', '')}`, '_blank');
+      }
+      return;
+    }
+    const msg = `Hi, I'm interested in this video.\n\nTitle: ${video.title}\nPrice: $${video.price.toFixed(2)}\nID: ${video.$id}\n\nPlease let me know how to proceed with payment.`;
+    const encoded = encodeURIComponent(msg);
     if (telegramUsername) {
-      window.open(`https://t.me/${telegramUsername}`, '_blank');
+      window.open(`https://t.me/${telegramUsername.replace('@', '')}?start=0&text=${encoded}`, '_blank');
+    } else {
+      window.open(`https://t.me/share/url?text=${encoded}`, '_blank');
     }
   };
 
