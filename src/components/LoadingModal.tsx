@@ -47,7 +47,7 @@ const LoadingModal: React.FC<LoadingModalProps> = ({ open, onClose }) => {
 
   useEffect(() => {
     if (open) {
-      setTimeLeft(12);
+      setTimeLeft(7);
     }
   }, [open]);
 

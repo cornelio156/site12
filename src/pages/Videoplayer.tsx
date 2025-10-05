@@ -83,7 +83,7 @@ const VideoPlayer: FC = () => {
   const [isStripeLoading, setIsStripeLoading] = useState(false);
   const [showPrePaymentModal, setShowPrePaymentModal] = useState(false);
   const [paymentType, setPaymentType] = useState<'stripe' | 'paypal' | null>(null);
-  const [redirectCountdown, setRedirectCountdown] = useState(10);
+  const [redirectCountdown, setRedirectCountdown] = useState(7);
   const [linkStatus, setLinkStatus] = useState<'checking' | 'working' | 'broken' | 'unknown'>('unknown');
   const [copiedLinkIndex, setCopiedLinkIndex] = useState<number | null>(null);
   const theme = useTheme();
@@ -597,8 +597,8 @@ const VideoPlayer: FC = () => {
     // Mostrar o modal informativo
     setShowPrePaymentModal(true);
     
-    // Iniciar contador de 10 segundos
-    setRedirectCountdown(10);
+    // Iniciar contador de 7 segundos
+    setRedirectCountdown(7);
     
     // Iniciar contagem regressiva
     const countdownInterval = setInterval(() => {
@@ -1550,7 +1550,7 @@ const VideoPlayer: FC = () => {
               <span>Redirecting in:</span> <span>{redirectCountdown} seconds</span>
             </Typography>
             
-            <LinearProgress variant="determinate" value={(10 - redirectCountdown) * 10} sx={{ mb: 2 }} />
+            <LinearProgress variant="determinate" value={(7 - redirectCountdown) * (100/7)} sx={{ mb: 2 }} />
             
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
               <Button 

@@ -9,9 +9,11 @@ import Box from '@mui/material/Box';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import TelegramIcon from '@mui/icons-material/Telegram';
+import CreditCardIcon from '@mui/icons-material/CreditCard';
 import Skeleton from '@mui/material/Skeleton';
 import { VideoService } from '../services/VideoService';
 import { useSiteConfig } from '../context/SiteConfigContext';
+import { StripeService } from '../services/StripeService';
 
 interface VideoCardProps {
   video: {
@@ -33,7 +35,8 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isThumbnailLoading, setIsThumbnailLoading] = useState(true);
   const [thumbnailError, setThumbnailError] = useState(false);
-  const { telegramUsername } = useSiteConfig();
+  const { telegramUsername, stripePublishableKey } = useSiteConfig();
+  const [isStripeLoading, setIsStripeLoading] = useState(false);
   
   const handleCardClick = async () => {
     try {
@@ -139,6 +142,30 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
     const base = telegramUsername ? `https://t.me/${telegramUsername.replace('@', '')}` : 'https://t.me/share/url';
     const url = telegramUsername ? `${base}?start=0&text=${encoded}` : `${base}?text=${encoded}`;
     window.open(url, '_blank');
+  };
+
+  const handleStripePay = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!stripePublishableKey) return;
+    try {
+      setIsStripeLoading(true);
+      await StripeService.initStripe(stripePublishableKey);
+      const productName = 'Video Access';
+      const successUrl = `${window.location.origin}/video/${video.$id}?payment_success=true&session_id={CHECKOUT_SESSION_ID}`;
+      const cancelUrl = `${window.location.origin}/video/${video.$id}?payment_canceled=true`;
+      const sessionId = await StripeService.createCheckoutSession(
+        video.price,
+        'usd',
+        productName,
+        successUrl,
+        cancelUrl
+      );
+      await StripeService.redirectToCheckout(sessionId);
+    } catch (err) {
+      console.error('Stripe payment error:', err);
+    } finally {
+      setIsStripeLoading(false);
+    }
   };
 
   return (
@@ -439,6 +466,22 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
             Telegram
           </Button>
         </Box>
+
+        {/* Stripe Pay button */}
+        {stripePublishableKey && (
+          <Box sx={{ mt: 1 }}>
+            <Button
+              variant="contained"
+              color="secondary"
+              fullWidth
+              startIcon={<CreditCardIcon />}
+              onClick={handleStripePay}
+              disabled={isStripeLoading}
+            >
+              {isStripeLoading ? 'Processing...' : 'Pay'}
+            </Button>
+          </Box>
+        )}
       </CardContent>
       </Card>
     </>
