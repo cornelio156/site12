@@ -66,6 +66,10 @@ const VideoPlayer: FC = () => {
   const { telegramUsername, paypalClientId, stripePublishableKey, cryptoWallets, siteName } = useSiteConfig();
   const [video, setVideo] = useState<Video | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [videoSources, setVideoSources] = useState<Array<{ id: string; source_file_id: string }>>([]);
+  const [sourceUrls, setSourceUrls] = useState<string[]>([]);
+  const [currentSourceIndex, setCurrentSourceIndex] = useState<number>(0);
+  const [allVideoUrls, setAllVideoUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
@@ -119,12 +123,35 @@ const VideoPlayer: FC = () => {
         // Increment view count
         await VideoService.incrementViews(id);
 
-        // Get preview video URL (this is the preview that everyone can watch)
+        // Get preview or first source URL
         try {
-          // Pass the current user ID as the second parameter or a dummy ID if not logged in
-          const url = await VideoService.getVideoFileUrl(id);
-          console.log('Video URL obtained:', url);
-          setPreviewUrl(url);
+          const sources = await VideoService.getVideoSources(id);
+          console.log('[videoplayer] Found sources:', sources.length, sources);
+          setVideoSources(sources.map(s => ({ id: s.id, source_file_id: s.source_file_id })));
+          const resolved: string[] = [];
+          for (const s of sources) {
+            const u = await VideoService.getFileUrlById(s.source_file_id);
+            if (u) resolved.push(u);
+          }
+          console.log('[videoplayer] Resolved URLs:', resolved.length, resolved);
+          setSourceUrls(resolved);
+          
+          // Combine main video with sources for navigation
+          const allUrls: string[] = [];
+          
+          // Add main video first if it exists
+          const mainVideoUrl = await VideoService.getVideoFileUrl(id);
+          if (mainVideoUrl) {
+            allUrls.push(mainVideoUrl);
+            setPreviewUrl(mainVideoUrl);
+          }
+          
+          // Add sources
+          allUrls.push(...resolved);
+          setAllVideoUrls(allUrls);
+          setCurrentSourceIndex(0);
+          
+          console.log('[videoplayer] All video URLs (main + sources):', allUrls.length, allUrls);
         } catch (err) {
           console.error('Error loading preview video:', err);
           // Don't set error, just log it - the thumbnail will be shown instead
@@ -179,7 +206,7 @@ const VideoPlayer: FC = () => {
 
   const handleTelegramRedirect = () => {
     if (!video) {
-      if (telegramUsername) {
+    if (telegramUsername) {
         window.open(`https://t.me/${telegramUsername.replace('@', '')}`, '_blank');
       }
       return;
@@ -763,7 +790,7 @@ const VideoPlayer: FC = () => {
           margin: '0 auto',
           position: 'relative'
         }}>
-          {previewUrl ? (
+          {(sourceUrls.length > 0 || previewUrl) ? (
             // Native browser player
             <Box sx={{ 
               width: '100%',
@@ -775,7 +802,7 @@ const VideoPlayer: FC = () => {
               bgcolor: '#000'
             }}>
               <video 
-                src={previewUrl}
+                src={allVideoUrls.length > 0 ? allVideoUrls[currentSourceIndex] : (previewUrl || undefined)}
                 controls 
                 autoPlay={false}
               poster={video?.thumbnailUrl}
@@ -783,11 +810,11 @@ const VideoPlayer: FC = () => {
               onPause={handleVideoPause}
                 onClick={handleVideoInteraction}
                 onMouseOver={handleVideoInteraction}
-                onLoadStart={() => console.log('Video load started:', previewUrl)}
-                onLoadedData={() => console.log('Video data loaded:', previewUrl)}
+                onLoadStart={() => console.log('Video load started:', allVideoUrls[currentSourceIndex])}
+                onLoadedData={() => console.log('Video data loaded:', allVideoUrls[currentSourceIndex])}
                 onError={(e) => {
                   console.error('Video load error:', e);
-                  console.error('Video URL:', previewUrl);
+                  console.error('Video URL:', allVideoUrls[currentSourceIndex]);
                   console.error('Thumbnail URL:', video?.thumbnailUrl);
                 }}
                 style={{
@@ -800,9 +827,10 @@ const VideoPlayer: FC = () => {
                   zIndex: 1000 /* Ensure video controls are above overlay */
                 }}
               >
-                <source src={previewUrl} type="video/mp4" />
+                <source src={allVideoUrls.length > 0 ? allVideoUrls[currentSourceIndex] : (previewUrl || undefined)} type="video/mp4" />
                 Seu navegador não suporta o elemento de vídeo.
               </video>
+
             </Box>
           ) : (
             // Show only the thumbnail if no video URL
@@ -956,6 +984,66 @@ const VideoPlayer: FC = () => {
         >
           Back to Videos
         </Button>
+        
+        {/* Video navigation controls - OUTSIDE the player */}
+        {console.log('[videoplayer] Checking navigation condition. allVideoUrls.length:', allVideoUrls.length, 'condition:', allVideoUrls.length > 1)}
+        {allVideoUrls.length > 1 && (
+          <Box sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 2,
+            mb: 3,
+            p: 2,
+            backgroundColor: 'rgba(0,0,0,0.05)',
+            borderRadius: 2,
+          }}>
+            {console.log('[videoplayer] Showing navigation controls. allVideoUrls.length:', allVideoUrls.length, 'currentSourceIndex:', currentSourceIndex)}
+            
+            <Button
+              variant="outlined"
+              color="primary"
+              size="large"
+              onClick={() => setCurrentSourceIndex((idx) => (idx - 1 + allVideoUrls.length) % allVideoUrls.length)}
+              startIcon={<ArrowBackIcon />}
+              sx={{ 
+                minWidth: 120,
+                height: 50,
+                fontWeight: 'bold'
+              }}
+            >
+              Previous Preview
+            </Button>
+            
+            <Box sx={{
+              backgroundColor: 'primary.main',
+              color: 'white',
+              padding: '8px 16px',
+              borderRadius: '20px',
+              fontSize: '16px',
+              fontWeight: 'bold',
+              minWidth: 80,
+              textAlign: 'center'
+            }}>
+              {currentSourceIndex + 1} / {allVideoUrls.length}
+            </Box>
+            
+            <Button
+              variant="outlined"
+              color="primary"
+              size="large"
+              onClick={() => setCurrentSourceIndex((idx) => (idx + 1) % allVideoUrls.length)}
+              endIcon={<ArrowBackIcon sx={{ transform: 'rotate(180deg)' }} />}
+              sx={{ 
+                minWidth: 120,
+                height: 50,
+                fontWeight: 'bold'
+              }}
+            >
+              Next Preview
+            </Button>
+          </Box>
+        )}
         
         {/* Video description */}
         <Box sx={{ mb: 4 }}>

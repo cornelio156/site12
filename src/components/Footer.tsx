@@ -87,7 +87,7 @@ const Footer: FC = () => {
           mx: 'auto'
         }}
       >
-        <WarningIcon sx={{ color: '#FF0F50', mr: 2 }} />
+        <WarningIcon sx={{ color: '#8e24aa', mr: 2 }} />
         <Typography variant="body2" sx={{ color: 'white' }}>
           <strong>AGE VERIFICATION NOTICE:</strong> This website contains adult content and is intended for adults aged 18 years or older. 
           By entering this site, you confirm that you are at least 18 years old and agree to our terms and conditions.
@@ -98,7 +98,7 @@ const Footer: FC = () => {
         <Grid container spacing={4}>
           <Grid item xs={12} md={4}>
             <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" sx={{ color: '#FF0F50', fontWeight: 'bold', mb: 2 }}>
+              <Typography variant="h6" sx={{ color: '#8e24aa', fontWeight: 'bold', mb: 2 }}>
                 {siteName}
               </Typography>
               <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)' }}>
@@ -110,7 +110,7 @@ const Footer: FC = () => {
           </Grid>
           
           <Grid item xs={12} md={4}>
-            <Typography variant="h6" sx={{ color: '#FF0F50', fontWeight: 'bold', mb: 2 }}>
+            <Typography variant="h6" sx={{ color: '#8e24aa', fontWeight: 'bold', mb: 2 }}>
               Quick Links
             </Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column' }}>
@@ -121,7 +121,7 @@ const Footer: FC = () => {
                   mb: 1.5, 
                   color: 'rgba(255,255,255,0.7)',
                   '&:hover': {
-                    color: '#FF69B4'
+                    color: '#8e24aa'
                   }
                 }}
               >
@@ -134,7 +134,7 @@ const Footer: FC = () => {
                   mb: 1.5, 
                   color: 'rgba(255,255,255,0.7)',
                   '&:hover': {
-                    color: '#FF69B4'
+                    color: '#8e24aa'
                   }
                 }}
               >
@@ -144,9 +144,9 @@ const Footer: FC = () => {
                 sx={{ 
                   display: 'flex', 
                   alignItems: 'center',
-                  color: '#FF69B4',
+                  color: '#8e24aa',
                   mt: 1,
-                  background: 'rgba(255,15,80,0.1)',
+                  background: 'rgba(142,36,170,0.1)',
                   px: 1.5,
                   py: 0.5,
                   borderRadius: 1,
@@ -161,7 +161,7 @@ const Footer: FC = () => {
           </Grid>
           
           <Grid item xs={12} md={4}>
-            <Typography variant="h6" sx={{ color: '#FF0F50', fontWeight: 'bold', mb: 2 }}>
+            <Typography variant="h6" sx={{ color: '#8e24aa', fontWeight: 'bold', mb: 2 }}>
               Legal Information
             </Typography>
             <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)' }} paragraph>
@@ -197,9 +197,9 @@ const Footer: FC = () => {
               startIcon={<LockIcon />}
               onClick={handleAdminAccess}
               sx={{ 
-                bgcolor: '#FF0F50', 
+                bgcolor: '#8e24aa', 
                 '&:hover': { 
-                  bgcolor: '#D00030' 
+                  bgcolor: '#6a1b9a' 
                 }
               }}
             >
@@ -215,11 +215,11 @@ const Footer: FC = () => {
                 onClick={handleSecretConfig}
                 sx={{ 
                   ml: 1,
-                  borderColor: '#FF0F50',
-                  color: '#FF0F50',
+                  borderColor: '#8e24aa',
+                  color: '#8e24aa',
                   '&:hover': { 
-                    borderColor: '#D00030',
-                    color: '#D00030'
+                    borderColor: '#6a1b9a',
+                    color: '#6a1b9a'
                   }
                 }}
               >

@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { FC, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { jsonDatabaseService, UserData, SessionData } from './JSONDatabaseService';
+import type { SessionData } from './JSONDatabaseService';
 
 // Define user type - mantém compatibilidade com o frontend
 interface User {
@@ -69,14 +69,18 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
     return () => clearInterval(intervalId);
   }, []);
 
-  // Login function using JSON database
+  // Helper: server API base
+  const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3000' : (import.meta.env.VITE_API_URL || '');
+
+  // Login function using Supabase-backed API
   const login = async (email: string, password: string, redirectPath?: string) => {
     try {
       setLoading(true);
       setError(null);
       
-      // First, query the JSON database to find the user with the provided email
-      const userData = await jsonDatabaseService.getUserByEmail(email);
+      // Fetch user from server (Supabase-backed)
+      const userResp = await fetch(`${API_BASE_URL}/api/users/email/${encodeURIComponent(email)}`);
+      const userData = userResp.ok ? await userResp.json() : null;
       
       if (!userData) {
         setError('Usuário não encontrado. Verifique suas credenciais.');
@@ -86,7 +90,8 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
       // Verify password hash using SHA256
       const hashedPassword = await hashPasswordWithWebCrypto(password);
       
-      if (hashedPassword !== userData.password) {
+      const storedHash: string = userData.password_hash || userData.password || '';
+      if (hashedPassword !== storedHash) {
         setError('Senha inválida. Tente novamente.');
         return;
       }
@@ -104,8 +109,8 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
         $id: userData.id,
         email: userData.email,
         name: userData.name,
-        password: userData.password,
-        created_at: userData.createdAt
+        password: userData.password_hash || userData.password || '',
+        created_at: userData.created_at || userData.createdAt
       };
       
       // Store user data and session in state
@@ -127,7 +132,7 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Create a new session for a user
+  // Create a new session for a user (via API -> Supabase)
   const createSession = async (userId: string): Promise<SessionData | null> => {
     try {
       // Generate a unique session token
@@ -138,16 +143,21 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
       expiresAt.setHours(expiresAt.getHours() + 24);
       
       // Session data
-      const sessionData: Omit<SessionData, 'id' | 'createdAt'> = {
+      const sessionPayload = {
         userId,
         token,
         userAgent: navigator.userAgent.substring(0, 255),
         expiresAt: expiresAt.toISOString(),
         isActive: true,
-      };
+      } as any;
       
-      // Create session in JSON database
-      const session = await jsonDatabaseService.createSession(sessionData);
+      // Create session via API
+      const resp = await fetch(`${API_BASE_URL}/api/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sessionPayload)
+      });
+      const session = resp.ok ? await resp.json() : null;
       
       // Store session token in local storage
       localStorage.setItem('sessionToken', token);
@@ -199,7 +209,11 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
   // Deactivate a session
   const deactivateSession = async (sessionId: string): Promise<void> => {
     try {
-      await jsonDatabaseService.updateSession(sessionId, { isActive: false });
+      await fetch(`${API_BASE_URL}/api/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: false })
+      });
       
       // Remove session token from local storage
       localStorage.removeItem('sessionToken');
@@ -224,8 +238,9 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
     try {
       console.log('Validating session with token:', token.substring(0, 10) + '...');
       
-      // Get session from JSON database
-      const session = await jsonDatabaseService.getSessionByToken(token);
+      // Get session from server (Supabase)
+      const resp = await fetch(`${API_BASE_URL}/api/sessions/token/${encodeURIComponent(token)}`);
+      const session = resp.ok ? await resp.json() : null;
       
       if (!session) {
         console.log('No session found with this token');
@@ -283,9 +298,10 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
         return;
       }
       
-      // Fetch user data from JSON database using the session's userId
+      // Fetch user data from server using the session's userId
       try {
-        const userData = await jsonDatabaseService.getUser(session.userId);
+        const userResp = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(session.userId)}`);
+        const userData = userResp.ok ? await userResp.json() : null;
         
         if (!userData) {
           // User not found, deactivate session
@@ -301,8 +317,8 @@ export const AuthProvider: FC<AuthProviderProps> = ({ children }) => {
           $id: userData.id,
           email: userData.email,
           name: userData.name,
-          password: userData.password,
-          created_at: userData.createdAt
+          password: userData.password_hash || userData.password || '',
+          created_at: userData.created_at || userData.createdAt
         };
         
         setUser(user);

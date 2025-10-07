@@ -81,7 +81,7 @@ const Header: FC = () => {
             sx={{
               display: 'flex',
               alignItems: 'center',
-              background: 'linear-gradient(to right, #FF0F50 0%, #D10D42 100%)',
+              background: 'linear-gradient(to right, #8e24aa 0%, #6a1b9a 100%)',
               borderRadius: '8px',
               px: 1.5,
               py: 0.5,
@@ -118,7 +118,7 @@ const Header: FC = () => {
             size="small"
             sx={{ 
               ml: 1, 
-              bgcolor: '#FF0F50', 
+              bgcolor: '#8e24aa', 
               color: 'white', 
               fontWeight: 'bold',
               height: '22px',
@@ -157,10 +157,10 @@ const Header: FC = () => {
                     borderWidth: '1px',
                   },
                   '&:hover fieldset': {
-                    borderColor: 'rgba(255, 15, 80, 0.4)',
+                    borderColor: 'rgba(142, 36, 170, 0.4)',
                   },
                   '&.Mui-focused fieldset': {
-                    borderColor: '#FF0F50',
+                    borderColor: '#8e24aa',
                     borderWidth: '1px',
                   },
                 },
@@ -281,9 +281,9 @@ const Header: FC = () => {
             onClick={toggleTheme} 
             sx={{ 
               ml: 1,
-              color: '#FF69B4',
+              color: '#8e24aa',
               '&:hover': {
-                bgcolor: 'rgba(255, 15, 80, 0.1)'
+                bgcolor: 'rgba(142, 36, 170, 0.1)'
               }
             }}
             aria-label="toggle theme"

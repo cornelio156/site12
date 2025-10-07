@@ -51,18 +51,18 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     palette: {
       mode,
       primary: {
-        main: '#FF0F50', // Vibrant red/pink for adult content
+        main: '#8e24aa', // Purple for adult content
       },
       secondary: {
-        main: '#9900CC', // Purple accent
+        main: '#6a1b9a', // Darker purple accent
       },
       background: {
-        default: mode === 'dark' ? '#0A0A0A' : '#f5f5f5', // Deeper black background
-        paper: mode === 'dark' ? '#121212' : '#ffffff',   // Darker cards
+        default: mode === 'dark' ? '#000000' : '#000000', // Pure black background
+        paper: mode === 'dark' ? '#1a1a1a' : '#1a1a1a',   // Dark cards
       },
       text: {
-        primary: mode === 'dark' ? '#FFFFFF' : '#000000',
-        secondary: mode === 'dark' ? '#FF69B4' : '#555555', // Hot pink for secondary text in dark mode
+        primary: mode === 'dark' ? '#FFFFFF' : '#FFFFFF',
+        secondary: mode === 'dark' ? '#8e24aa' : '#8e24aa', // Purple for secondary text
       },
       error: {
         main: '#FF0000', // Pure red for errors
@@ -98,9 +98,9 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
             transition: 'all 0.3s ease',
           },
           containedPrimary: {
-            backgroundColor: '#FF0F50',
+            backgroundColor: '#8e24aa',
             '&:hover': {
-              backgroundColor: '#D10D42',
+              backgroundColor: '#6a1b9a',
               transform: 'scale(1.03)',
             },
           },
@@ -122,7 +122,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
       MuiAppBar: {
         styleOverrides: {
           root: {
-            backgroundColor: mode === 'dark' ? '#121212' : '#ffffff',
+            backgroundColor: mode === 'dark' ? '#1a1a1a' : '#1a1a1a',
             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
           },
         },
@@ -131,7 +131,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
         styleOverrides: {
           root: {
             '&:hover': {
-              backgroundColor: 'rgba(255, 15, 80, 0.1)',
+              backgroundColor: 'rgba(142, 36, 170, 0.1)',
             }
           }
         }

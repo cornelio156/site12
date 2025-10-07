@@ -1,5 +1,6 @@
 import { createContext, useState, useContext, useEffect, ReactNode } from 'react';
 import { jsonDatabaseService, SiteConfigData } from '../services/JSONDatabaseService';
+import { SupabaseService } from '../services/SupabaseService';
 
 // Define the site config interface - mantém compatibilidade com o frontend
 interface SiteConfig {
@@ -121,24 +122,36 @@ export const SiteConfigProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       setError(null);
       
-      // Primeiro, tentar carregar do JSON database
       let configData: SiteConfigData | null = null;
       
-      try {
-        configData = await jsonDatabaseService.getSiteConfig();
-      } catch (err) {
-        console.log('JSON database not available, trying to load from public file');
-        
-        // Se não conseguir do JSON database, carregar do arquivo público
+      if (SupabaseService.isConfigured()) {
         try {
-          const response = await fetch('/site_config.json');
-          if (response.ok) {
-            configData = await response.json();
+          const supa = await SupabaseService.getSiteConfig();
+          if (supa) {
+            configData = {
+              siteName: supa.site_name || 'VideosPlus',
+              paypalClientId: supa.paypal_client_id || '',
+              paypalMeUsername: supa.paypal_me_username || '',
+              stripePublishableKey: supa.stripe_publishable_key || '',
+              stripeSecretKey: supa.stripe_secret_key || '',
+              telegramUsername: supa.telegram_username || '',
+              videoListTitle: supa.video_list_title || 'Available Videos',
+              crypto: supa.crypto || [],
+              emailHost: supa.email?.host || 'smtp.gmail.com',
+              emailPort: supa.email?.port || '587',
+              emailSecure: supa.email?.secure || false,
+              emailUser: supa.email?.user || '',
+              emailPass: supa.email?.pass || '',
+              emailFrom: supa.email?.from || '',
+              wasabiConfig: supa.wasabi_config || { accessKey: '', secretKey: '', region: '', bucket: '', endpoint: '' }
+            } as SiteConfigData;
           }
-        } catch (fileErr) {
-          console.error('Error loading from public file:', fileErr);
+        } catch (e) {
+          console.warn('Failed to load config from Supabase, falling back', e);
         }
       }
+
+      // Sem fallback: metadados devem vir do Supabase
       
       if (configData) {
         const siteConfig = convertToSiteConfig(configData);
@@ -185,21 +198,35 @@ export const SiteConfigProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       setError(null);
       
-      // Obter configuração atual
+      if (SupabaseService.isConfigured()) {
+        const supaPayload: any = {
+          site_name: updates.siteName,
+          paypal_client_id: updates.paypalClientId,
+          paypal_me_username: updates.paypalMeUsername,
+          stripe_publishable_key: updates.stripePublishableKey,
+          stripe_secret_key: updates.stripeSecretKey,
+          telegram_username: updates.telegramUsername,
+          video_list_title: updates.videoListTitle,
+          crypto: updates.crypto,
+          email: {
+            host: updates.emailHost,
+            port: updates.emailPort,
+            secure: updates.emailSecure,
+            user: updates.emailUser,
+            pass: updates.emailPass,
+            from: updates.emailFrom
+          },
+          wasabi_config: updates.wasabiConfig
+        };
+        await SupabaseService.updateSiteConfig(supaPayload);
+        await fetchSiteConfig();
+      } else {
       const currentConfig = await jsonDatabaseService.getSiteConfig();
-      
-      // Mesclar com as atualizações
-      const updatedConfig: SiteConfigData = {
-        ...currentConfig,
-        ...updates
-      };
-      
-      // Salvar no JSON database
+        const updatedConfig: SiteConfigData = { ...currentConfig, ...updates };
       await jsonDatabaseService.updateSiteConfig(updatedConfig);
-      
-      // Atualizar estado local
       const siteConfig = convertToSiteConfig(updatedConfig);
       setConfig(siteConfig);
+      }
       
     } catch (err) {
       console.error('Error updating site config:', err);

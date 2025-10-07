@@ -45,11 +45,21 @@ class WasabiService {
   private async initializeWithDefaultConfig(): Promise<void> {
     try {
       // Tentar carregar configurações do site
-      const response = await fetch('/api/site-config');
+      const baseUrl = import.meta.env.DEV ? 'http://localhost:3000' : '';
+      const response = await fetch(`${baseUrl}/api/site-config`);
       if (response.ok) {
         const siteConfig = await response.json();
-        if (siteConfig.wasabiConfig) {
-          await this.initialize(siteConfig.wasabiConfig);
+        // Aceitar tanto camelCase quanto snake_case
+        const cfg = siteConfig.wasabiConfig || siteConfig.wasabi_config;
+        if (cfg) {
+          const normalized = {
+            accessKey: cfg.accessKey || cfg.access_key || '',
+            secretKey: cfg.secretKey || cfg.secret_key || '',
+            region: cfg.region || '',
+            bucket: cfg.bucket || '',
+            endpoint: cfg.endpoint || ''
+          } as WasabiConfig;
+          await this.initialize(normalized);
           return;
         }
       }
@@ -64,6 +74,7 @@ class WasabiService {
   // Upload de arquivo para o Wasabi via servidor
   async uploadFile(file: File, folder: 'videos' | 'thumbnails' = 'videos'): Promise<UploadResult> {
     try {
+      await this.checkInitialized();
       const formData = new FormData();
       formData.append('file', file);
       

@@ -17,16 +17,14 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Skeleton from '@mui/material/Skeleton';
 import Tooltip from '@mui/material/Tooltip';
-import TextField from '@mui/material/TextField';
-import InputAdornment from '@mui/material/InputAdornment';
-import SearchIcon from '@mui/icons-material/Search';
-import Paper from '@mui/material/Paper';
+ 
 import { Chip } from '@mui/material';
 import { useAuth } from '../services/Auth';
 import VideoCard from '../components/VideoCard';
 import { VideoService, Video, SortOption } from '../services/VideoService';
 import { useSiteConfig } from '../context/SiteConfigContext';
 import FeaturedBanner from '../components/FeaturedBanner';
+import PromoOfferBanner from '../components/PromoOfferBanner';
 import DatabaseSetupModal from '../components/DatabaseSetupModal';
 import CredentialsStatus from '../components/CredentialsStatus';
 import ContactSection from '../components/ContactSection';
@@ -130,12 +128,15 @@ const Home: FC = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [setupModalOpen, setSetupModalOpen] = useState(false);
   const [showSetupButton, setShowSetupButton] = useState(false);
-  const [quickSearchQuery, setQuickSearchQuery] = useState('');
+  
   const [loadedVideos, setLoadedVideos] = useState<Video[]>([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [sectionOnlineNow, setSectionOnlineNow] = useState<number>(() => Math.floor(Math.random() * 101));
+  const [sectionHappyCustomers] = useState<number>(() => Math.floor(Math.random() * (1300 - 700 + 1)) + 700);
+  const [sectionRating] = useState<number>(() => parseFloat((Math.random() * 0.6 + 4.2).toFixed(1)));
   
   const { user } = useAuth();
-  const { videoListTitle } = useSiteConfig();
+  const { videoListTitle, telegramUsername } = useSiteConfig();
   const navigate = useNavigate();
   const videosPerPage = 24; // Aumentar de 12 para 24 vídeos por página
 
@@ -174,6 +175,18 @@ const Home: FC = () => {
     // Sempre mostrar o botão de configuração (não dependemos mais do Appwrite)
     setShowSetupButton(false);
   }, [user, page]);
+
+  // Animate small online counter (0-100) below the title
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSectionOnlineNow(prev => {
+        const delta = Math.floor(Math.random() * 12) - 5; // -5..+6
+        const next = prev + delta;
+        return Math.min(100, Math.max(0, next));
+      });
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Function to load videos one by one (immediate first video)
   const loadVideosOneByOne = async (videoIds: string[]) => {
@@ -257,16 +270,7 @@ const Home: FC = () => {
     setError(errorMsg);
   };
 
-  const handleQuickSearch = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (quickSearchQuery.trim()) {
-      navigate(`/videos?search=${encodeURIComponent(quickSearchQuery.trim())}`);
-    }
-  };
-
-  const handleQuickSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setQuickSearchQuery(event.target.value);
-  };
+  
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -281,6 +285,9 @@ const Home: FC = () => {
         `}
       </style>
       
+      {/* Promoção especial */}
+      <PromoOfferBanner telegramUsername={telegramUsername} />
+
       {/* Banner de destaque */}
       <FeaturedBanner onError={handleBannerError} />
       
@@ -288,75 +295,6 @@ const Home: FC = () => {
         {/* Status das Credenciais */}
         <CredentialsStatus />
         
-        {/* Barra de Pesquisa Rápida */}
-        <Paper 
-          elevation={2}
-          sx={{ 
-            p: 2, 
-            mb: 3, 
-            background: 'linear-gradient(135deg, rgba(255, 15, 80, 0.08) 0%, rgba(209, 13, 66, 0.08) 100%)',
-            borderRadius: 1.5,
-            border: '1px solid rgba(255, 15, 80, 0.1)'
-          }}
-        >
-          <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600, mb: 1.5, fontSize: '1rem' }}>
-            🔍 Find Your Perfect Video
-          </Typography>
-          <Box 
-            component="form" 
-            onSubmit={handleQuickSearch}
-            sx={{ 
-              display: 'flex', 
-              gap: 1.5, 
-              alignItems: 'center',
-              flexDirection: { xs: 'column', sm: 'row' }
-            }}
-          >
-            <TextField
-              placeholder="Search by title, category, or description..."
-              size="small"
-              value={quickSearchQuery}
-              onChange={handleQuickSearchChange}
-              sx={{ 
-                flexGrow: 1,
-                minWidth: { xs: '100%', sm: '280px' },
-                '& .MuiOutlinedInput-root': {
-                  backgroundColor: 'background.paper',
-                  height: '40px',
-                  '&:hover fieldset': {
-                    borderColor: 'primary.main',
-                  },
-                },
-                '& .MuiInputBase-input': {
-                  fontSize: '0.9rem',
-                },
-              }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon color="primary" sx={{ fontSize: '20px' }} />
-                  </InputAdornment>
-                ),
-              }}
-            />
-            <Button 
-              type="submit"
-              variant="contained"
-              color="primary"
-              size="small"
-              sx={{ 
-                minWidth: { xs: '100%', sm: '100px' },
-                py: 1,
-                px: 2,
-                fontWeight: 600,
-                height: '40px'
-              }}
-              disabled={!quickSearchQuery.trim()}
-            >
-              Search
-            </Button>
-          </Box>
-        </Paper>
 
         <Box sx={{ 
           display: 'flex', 
@@ -380,6 +318,37 @@ const Home: FC = () => {
                     fontWeight: 'bold',
                     border: '1px solid rgba(255, 15, 80, 0.3)'
                   }}
+                />
+                <Chip 
+                  label={`${sectionHappyCustomers}+ Happy Customers`}
+                  size="small"
+                  sx={{ 
+                    backgroundColor: 'rgba(76, 175, 80, 0.12)',
+                    color: '#2E7D32',
+                    fontWeight: 'bold',
+                    border: '1px solid rgba(76, 175, 80, 0.35)'
+                  }}
+                />
+                <Chip 
+                  label={`⭐ ${sectionRating}/5 Rating`}
+                  size="small"
+                  sx={{ 
+                    backgroundColor: 'rgba(255, 193, 7, 0.12)',
+                    color: '#B28704',
+                    fontWeight: 'bold',
+                    border: '1px solid rgba(255, 193, 7, 0.35)'
+                  }}
+                />
+                <Chip 
+                  label={`${sectionOnlineNow} online`}
+                  size="small"
+                  sx={{ 
+                    backgroundColor: 'rgba(244, 67, 54, 0.12)',
+                    color: '#D32F2F',
+                    fontWeight: 'bold',
+                    border: '1px solid rgba(244, 67, 54, 0.35)'
+                  }}
+                  icon={<span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff4d4f', display: 'inline-block', boxShadow: '0 0 0 2px rgba(255,77,79,0.2)' }} />}
                 />
                 <Chip 
                   label={`Up to $${Math.max(...videos.map(v => v.price)).toFixed(2)}`}

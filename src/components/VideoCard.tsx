@@ -14,6 +14,7 @@ import Skeleton from '@mui/material/Skeleton';
 import { VideoService } from '../services/VideoService';
 import { useSiteConfig } from '../context/SiteConfigContext';
 import { StripeService } from '../services/StripeService';
+import MultiVideoPreview from './MultiVideoPreview';
 
 interface VideoCardProps {
   video: {
@@ -27,6 +28,14 @@ interface VideoCardProps {
     views?: number;
     createdAt?: string;
     created_at?: string;
+    // Support for multiple videos in preview
+    relatedVideos?: Array<{
+      $id: string;
+      title: string;
+      thumbnailUrl?: string;
+      duration?: string | number;
+      price: number;
+    }>;
   };
 }
 
@@ -191,12 +200,12 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
           overflow: 'hidden',
           boxShadow: theme => `0 8px 20px ${theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.15)'}`,
           cursor: 'pointer',
-          backgroundColor: theme => theme.palette.mode === 'dark' ? '#121212' : '#ffffff',
-          border: '1px solid rgba(255,15,80,0.1)',
+          backgroundColor: '#1a1a1a',
+          border: '1px solid rgba(142,36,170,0.2)',
           '&:hover': {
             transform: 'translateY(-10px) scale(1.02)',
-            boxShadow: '0 16px 30px rgba(0,0,0,0.25)',
-            borderColor: '#FF0F50',
+            boxShadow: '0 16px 30px rgba(142,36,170,0.3)',
+            borderColor: '#8e24aa',
           }
         }}
         onClick={handleCardClick}
@@ -204,7 +213,31 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
         onMouseLeave={() => setIsHovered(false)}
       >
       <Box sx={{ position: 'relative', paddingTop: '56.25%' /* 16:9 aspect ratio */ }}>
-        {/* Thumbnail image */}
+        {/* Multi-video preview (from previewSources) or single thumbnail */}
+        {(video as any).previewSources && (video as any).previewSources.length > 0 ? (
+          <Box sx={{ 
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+          }}>
+            <MultiVideoPreview
+              videos={[(video as any).previewSources].flat().slice(0,3).map((src: any, idx: number) => ({
+                $id: `${video.$id}::${src.id}`,
+                title: video.title,
+                thumbnailUrl: src.thumbnail_file_id ? undefined : video.thumbnailUrl,
+                duration: video.duration,
+                price: video.price
+              }))}
+              onVideoClick={(videoId) => navigate(`/video/${videoId}`)}
+              autoPlay={isHovered}
+              showControls={isHovered}
+            />
+          </Box>
+        ) : (
+          <>
+            {/* Single thumbnail image */}
         {video.thumbnailUrl && !thumbnailError ? (
           <CardMedia
             component="img"
@@ -236,6 +269,8 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
             }} 
             animation="wave" 
           />
+            )}
+          </>
         )}
 
         {/* Loading indicator overlay */}
@@ -259,7 +294,7 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
               size={40} 
               thickness={4}
               sx={{ 
-                color: '#FF0F50',
+                color: '#8e24aa',
                 mb: 1,
                 animation: 'pulse 1.5s ease-in-out infinite'
               }} 
@@ -316,7 +351,7 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
             position: 'absolute', 
             top: 8, 
             left: 8, 
-            backgroundColor: '#FF0F50',
+            backgroundColor: '#8e24aa',
             color: 'white',
             fontWeight: 'bold',
             fontSize: '0.7rem',
@@ -372,8 +407,8 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
             fontWeight: 'bold',
             fontSize: '0.9rem',
             height: '32px',
-            boxShadow: '0 4px 12px rgba(255, 15, 80, 0.4)',
-            backgroundColor: '#FF0F50',
+            boxShadow: '0 4px 12px rgba(142, 36, 170, 0.4)',
+            backgroundColor: '#8e24aa',
             border: '2px solid rgba(255, 255, 255, 0.3)',
             '& .MuiChip-label': {
               color: 'white',
@@ -381,7 +416,7 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
               px: 1.5
             },
             '&:hover': {
-              backgroundColor: '#D10D42',
+              backgroundColor: '#6a1b9a',
               transform: 'scale(1.05)',
               transition: 'all 0.2s ease'
             }
@@ -401,13 +436,13 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
           display: '-webkit-box',
           WebkitLineClamp: 2,
           WebkitBoxOrient: 'vertical',
-          color: theme => theme.palette.mode === 'dark' ? 'white' : 'text.primary',
+          color: 'white',
         }}>
           {video.title}
         </Typography>
         
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: theme => theme.palette.mode === 'dark' ? '#FF69B4' : 'text.secondary' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: '#8e24aa' }}>
             <VisibilityIcon sx={{ fontSize: 16 }} />
             <Typography variant="caption">
               {formatViews(video.views)}
@@ -415,7 +450,7 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
           </Box>
           
           {createdAtField && (
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+            <Typography variant="caption" sx={{ color: '#8e24aa' }}>
               {formatDate(createdAtField)}
             </Typography>
           )}
@@ -428,14 +463,14 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
           alignItems: 'center',
           mt: 1,
           p: 1,
-          backgroundColor: 'rgba(255, 15, 80, 0.1)',
+          backgroundColor: 'rgba(142, 36, 170, 0.1)',
           borderRadius: 1,
-          border: '1px solid rgba(255, 15, 80, 0.2)'
+          border: '1px solid rgba(142, 36, 170, 0.2)'
         }}>
           <Typography 
             variant="h6" 
             sx={{ 
-              color: '#FF0F50',
+              color: '#8e24aa',
               fontWeight: 'bold',
               fontSize: '1.1rem',
               textAlign: 'center'
@@ -449,19 +484,32 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
         <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
           <Button
             variant="contained"
-            color="primary"
             fullWidth
             startIcon={<VisibilityIcon />}
             onClick={handlePreviewClick}
+            sx={{
+              backgroundColor: '#8e24aa',
+              color: 'white',
+              '&:hover': {
+                backgroundColor: '#6a1b9a',
+              }
+            }}
           >
             Preview
           </Button>
           <Button
             variant="outlined"
-            color="primary"
             fullWidth
             startIcon={<TelegramIcon />}
             onClick={handleTelegramClick}
+            sx={{
+              borderColor: '#8e24aa',
+              color: '#8e24aa',
+              '&:hover': {
+                borderColor: '#6a1b9a',
+                backgroundColor: 'rgba(142, 36, 170, 0.1)',
+              }
+            }}
           >
             Telegram
           </Button>
@@ -472,11 +520,21 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
           <Box sx={{ mt: 1 }}>
             <Button
               variant="contained"
-              color="secondary"
               fullWidth
               startIcon={<CreditCardIcon />}
               onClick={handleStripePay}
               disabled={isStripeLoading}
+              sx={{
+                backgroundColor: '#6a1b9a',
+                color: 'white',
+                '&:hover': {
+                  backgroundColor: '#4a148c',
+                },
+                '&:disabled': {
+                  backgroundColor: '#4a148c',
+                  opacity: 0.6,
+                }
+              }}
             >
               {isStripeLoading ? 'Processing...' : 'Pay'}
             </Button>

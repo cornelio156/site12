@@ -1,6 +1,6 @@
 // Serverless function for creating Stripe checkout sessions
 import Stripe from 'stripe';
-import { Client, Databases } from 'node-appwrite';
+import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
   // Add CORS headers for Vercel
@@ -17,48 +17,29 @@ export default async function handler(req, res) {
   }
 
   try {
-    // First, get the Stripe secret key from Appwrite
-    let stripeSecretKey = '';
-    
-    // Use Vercel environment variables (sem VITE_ prefix para serverless)
-    const projectId = process.env.APPWRITE_PROJECT_ID;
-    const apiKey = process.env.APPWRITE_API_KEY;
-    
-    if (!projectId || !apiKey) {
-      console.error('Missing Appwrite credentials:', { projectId: !!projectId, apiKey: !!apiKey });
-      return res.status(500).json({ 
-        error: 'Appwrite credentials not configured in Vercel environment variables' 
-      });
-    }
-    
-    const client = new Client()
-      .setEndpoint('https://fra.cloud.appwrite.io/v1') // Endpoint fixo
-      .setProject(projectId)
-      .setKey(apiKey);
-      
-    const databases = new Databases(client);
-    
-    try {
-      // Get site config from Appwrite
-      const response = await databases.listDocuments(
-        'video_site_db', // Database ID fixo
-        'site_config'  // Site Config Collection ID fixo
-      );
-      
-      if (response.documents.length > 0) {
-        const config = response.documents[0];
-        stripeSecretKey = config.stripe_secret_key;
+    // Get Stripe secret key from Supabase site_config or env
+    let stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
+    if (!stripeSecretKey) {
+      const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+      const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+      if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) {
+        return res.status(500).json({ error: 'Supabase not configured on server' });
       }
-    } catch (appwriteError) {
-      console.error('Error fetching Stripe secret key from Appwrite:', appwriteError);
-      return res.status(500).json({ 
-        error: 'Failed to fetch Stripe credentials from Appwrite',
-        details: appwriteError.message
-      });
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, { auth: { persistSession: false } });
+      const { data: cfg, error: cfgErr } = await supabase
+        .from('site_config')
+        .select('stripe_secret_key')
+        .limit(1)
+        .maybeSingle();
+      if (cfgErr) {
+        console.error('Error fetching Stripe secret key from Supabase:', cfgErr);
+        return res.status(500).json({ error: 'Failed to fetch Stripe credentials from Supabase', details: cfgErr.message });
+      }
+      stripeSecretKey = cfg?.stripe_secret_key || '';
     }
     
     if (!stripeSecretKey) {
-      return res.status(500).json({ error: 'Stripe secret key not found in Appwrite configuration' });
+      return res.status(500).json({ error: 'Stripe secret key not configured' });
     }
     
     console.log('Stripe secret key found, initializing Stripe...');

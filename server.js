@@ -7,6 +7,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import apiRoutes from './api-routes.js';
+import { createClient } from '@supabase/supabase-js';
 // SQLite removido - usando Wasabi como fonte principal
 
 const __filename = fileURLToPath(import.meta.url);
@@ -162,11 +163,8 @@ if (process.env.NODE_ENV === 'production') {
 // Inicializar e iniciar servidor
 async function startServer() {
   try {
-    console.log('Iniciando servidor com Wasabi como fonte principal...');
-    
-    // Inicializar arquivos de dados (para compatibilidade)
-    await initializeDataFiles();
-    console.log('Data files initialized');
+    console.log('Iniciando servidor: metadados no Supabase, armazenamento no Wasabi');
+    // Removido: inicialização de arquivos JSON locais e criação de metadata no Wasabi
     
     // Iniciar servidor primeiro
     app.listen(PORT, '0.0.0.0', () => {
@@ -174,88 +172,48 @@ async function startServer() {
       console.log(`API available at http://localhost:${PORT}/api`);
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
       
-      // Verificar se arquivo JSON existe no Wasabi, se não existir, criar com dados iniciais
-      setTimeout(async () => {
-        try {
-          console.log('Verificando se arquivo JSON existe no Wasabi...');
-          
-          // Tentar verificar se o arquivo existe
-          const checkResponse = await fetch(`http://localhost:${PORT}/api/backup/status`);
-          let fileExists = false;
-          
-          if (checkResponse.ok) {
-            const status = await checkResponse.json();
-            fileExists = status.hasBackup;
-          }
-          
-          if (!fileExists) {
-            console.log('Arquivo JSON não encontrado no Wasabi, criando com dados iniciais...');
-            
-            // Criar dados iniciais com configuração do site
-            const initialData = {
-              videos: [],
-              users: [
-                {
-                  id: 'admin-001',
-                  email: 'admin@gmail.com',
-                  name: 'Administrador',
-                  password: '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', // admin123 em SHA256 (hash correto)
-                  createdAt: new Date().toISOString()
-                }
-              ],
-              sessions: [],
-              siteConfig: {
-                siteName: 'VideosPlus',
-                paypalClientId: '',
-                paypalMeUsername: '',
-                stripePublishableKey: '',
-                stripeSecretKey: '',
-                telegramUsername: 'nlyadm19',
-                videoListTitle: 'Available Videos',
-                crypto: [],
-                emailHost: 'smtp.gmail.com',
-                emailPort: '587',
-                emailSecure: false,
-                emailUser: '',
-                emailPass: '',
-                emailFrom: '',
-                wasabiConfig: {
-                  accessKey: process.env.VITE_WASABI_ACCESS_KEY || '',
-                  secretKey: process.env.VITE_WASABI_SECRET_KEY || '',
-                  region: process.env.VITE_WASABI_REGION || '',
-                  bucket: process.env.VITE_WASABI_BUCKET || '',
-                  endpoint: process.env.VITE_WASABI_ENDPOINT || ''
-                }
-              }
-            };
+      console.log('Metadados: Supabase | Arquivos: Wasabi');
 
-            // Fazer upload do arquivo inicial para o Wasabi
-            const formData = new FormData();
-            const blob = new Blob([JSON.stringify(initialData, null, 2)], { type: 'application/json' });
-            formData.append('file', blob, 'videosplus-data.json');
-            
-            const response = await fetch(`http://localhost:${PORT}/api/upload/metadata`, {
-              method: 'POST',
-              body: formData
-            });
-            
-            if (response.ok) {
-              console.log('Arquivo JSON inicial criado com sucesso no Wasabi');
-              console.log('Dados iniciais incluídos:');
-              console.log('- Usuário admin: admin@gmail.com / admin123');
-              console.log('- Configuração do site: VideosPlus');
-              console.log('- Configuração Wasabi:', process.env.VITE_WASABI_BUCKET || 'não configurado');
+      // Garantir admin padrão no Supabase
+      (async () => {
+        try {
+          const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+          const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+          if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) {
+            console.warn('[bootstrap] Supabase env not set; skip ensure admin');
+            return;
+          }
+          const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, { auth: { persistSession: false } });
+          const { data: existing, error: selErr } = await supabase
+            .from('users')
+            .select('id')
+            .eq('email', 'admin@gmail.com')
+            .maybeSingle();
+          if (selErr) {
+            console.warn('[bootstrap] Could not query users table:', selErr.message);
+            return;
+          }
+          if (!existing) {
+            const { error: insErr } = await supabase
+              .from('users')
+              .insert({
+                email: 'admin@gmail.com',
+                name: 'Administrator',
+                role: 'admin',
+                password_hash: '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9'
+              });
+            if (insErr) {
+              console.warn('[bootstrap] Failed to insert default admin:', insErr.message);
             } else {
-              console.log('Erro ao criar arquivo JSON inicial no Wasabi');
+              console.log('[bootstrap] Default admin ensured (admin@gmail.com)');
             }
           } else {
-            console.log('Arquivo JSON já existe no Wasabi, mantendo dados existentes');
+            console.log('[bootstrap] Admin already exists');
           }
-          
-        } catch (error) {
-          console.log('Erro ao verificar/criar arquivo JSON:', error.message);
+        } catch (e) {
+          console.warn('[bootstrap] Ensure admin error:', e?.message || e);
         }
-      }, 1000); // Aguardar 1 segundo para o servidor estar pronto
+      })();
     });
   } catch (error) {
     console.error('Failed to start server:', error);
