@@ -146,7 +146,31 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
 
   const handleTelegramClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const msg = `Hi, I'm interested in this video.\n\nTitle: ${video.title}\nPrice: $${video.price.toFixed(2)}\nID: ${video.$id}\n\nPlease let me know how to proceed with payment.`;
+    
+    // Format date for "Added" field
+    const formatAddedDate = (date: Date) => {
+      const now = new Date();
+      const diffTime = Math.abs(now.getTime() - date.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays === 1) return '1 day ago';
+      if (diffDays < 7) return `${diffDays} days ago`;
+      if (diffDays < 30) return `${Math.ceil(diffDays / 7)} weeks ago`;
+      return `${Math.ceil(diffDays / 30)} months ago`;
+    };
+    
+    const msg = `🎬 *${video.title}*
+
+💰 *Price:* $${video.price.toFixed(2)}
+⏱️ *Duration:* ${formatDuration(video.duration)}
+👀 *Views:* ${formatViews(video.views)}
+📅 *Added:* ${formatAddedDate(new Date(video.createdAt || video.created_at || Date.now()))}
+
+📝 *Description:*
+${video.description || 'No description available'}
+
+Please let me know how to proceed with payment.`;
+    
     const encoded = encodeURIComponent(msg);
     const base = telegramUsername ? `https://t.me/${telegramUsername.replace('@', '')}` : 'https://t.me/share/url';
     const url = telegramUsername ? `${base}?start=0&text=${encoded}` : `${base}?text=${encoded}`;

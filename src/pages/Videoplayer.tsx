@@ -206,12 +206,36 @@ const VideoPlayer: FC = () => {
 
   const handleTelegramRedirect = () => {
     if (!video) {
-    if (telegramUsername) {
+      if (telegramUsername) {
         window.open(`https://t.me/${telegramUsername.replace('@', '')}`, '_blank');
       }
       return;
     }
-    const msg = `Hi, I'm interested in this video.\n\nTitle: ${video.title}\nPrice: $${video.price.toFixed(2)}\nID: ${video.$id}\n\nPlease let me know how to proceed with payment.`;
+    
+    // Format date for "Added" field
+    const formatAddedDate = (date: Date) => {
+      const now = new Date();
+      const diffTime = Math.abs(now.getTime() - date.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays === 1) return '1 day ago';
+      if (diffDays < 7) return `${diffDays} days ago`;
+      if (diffDays < 30) return `${Math.ceil(diffDays / 7)} weeks ago`;
+      return `${Math.ceil(diffDays / 30)} months ago`;
+    };
+    
+    const msg = `🎬 *${video.title}*
+
+💰 *Price:* $${video.price.toFixed(2)}
+⏱️ *Duration:* ${formatDuration(video.duration)}
+👀 *Views:* ${formatViews(video.views)}
+📅 *Added:* ${formatAddedDate(new Date(video.createdAt || Date.now()))}
+
+📝 *Description:*
+${video.description || 'No description available'}
+
+Please let me know how to proceed with payment.`;
+    
     const encoded = encodeURIComponent(msg);
     if (telegramUsername) {
       window.open(`https://t.me/${telegramUsername.replace('@', '')}?start=0&text=${encoded}`, '_blank');
@@ -986,7 +1010,6 @@ const VideoPlayer: FC = () => {
         </Button>
         
         {/* Video navigation controls - OUTSIDE the player */}
-        {console.log('[videoplayer] Checking navigation condition. allVideoUrls.length:', allVideoUrls.length, 'condition:', allVideoUrls.length > 1)}
         {allVideoUrls.length > 1 && (
           <Box sx={{
             display: 'flex',
@@ -998,8 +1021,6 @@ const VideoPlayer: FC = () => {
             backgroundColor: 'rgba(0,0,0,0.05)',
             borderRadius: 2,
           }}>
-            {console.log('[videoplayer] Showing navigation controls. allVideoUrls.length:', allVideoUrls.length, 'currentSourceIndex:', currentSourceIndex)}
-            
             <Button
               variant="outlined"
               color="primary"
@@ -1539,9 +1560,41 @@ const VideoPlayer: FC = () => {
               <b>After payment, send your proof of payment via Telegram for manual confirmation.</b>
             </Typography>
             {cryptoWallets.map((wallet, idx) => {
-              // Parse wallet: "CODE - Name\naddress"
-              const [header, address] = wallet.split('\n');
-              const [code, name] = header.split(' - ');
+              // Parse wallet: "CODE:address" format (from Admin.tsx)
+              let code = '';
+              let name = '';
+              let address = '';
+              
+              if (wallet.includes(':')) {
+                // Format: "CODE:address"
+                const parts = wallet.split(':');
+                code = parts[0]?.trim() || '';
+                address = parts[1]?.trim() || '';
+                name = code; // Use code as name
+              } else if (wallet.includes('\n')) {
+                // Format: "CODE - Name\naddress" (legacy)
+                const lines = wallet.split('\n');
+                const header = lines[0];
+                address = lines[1]?.trim() || '';
+                
+                if (header.includes(' - ')) {
+                  const parts = header.split(' - ');
+                  code = parts[0]?.trim() || '';
+                  name = parts[1]?.trim() || '';
+                } else {
+                  name = header.trim();
+                  code = header.trim().split(' ')[0];
+                }
+              } else {
+                // Fallback: treat as address only
+                address = wallet.trim();
+                code = wallet.trim().split(' ')[0];
+                name = 'Crypto Wallet';
+              }
+              
+              // Only render if we have a valid address
+              if (!address) return null;
+              
               return (
                 <Box key={idx} sx={{
                   display: 'flex',
@@ -1556,7 +1609,7 @@ const VideoPlayer: FC = () => {
                 }}>
                   <Box sx={{ minWidth: 40 }}>{cryptoIcons[code] || <MonetizationOnIcon fontSize="large" />}</Box>
                   <Box sx={{ flex: 1 }}>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>{name || code}</Typography>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>{name || code || 'Crypto Wallet'}</Typography>
                     <Typography variant="body2" sx={{ wordBreak: 'break-all', color: theme.palette.mode === 'dark' ? '#fff' : '#222' }}>{address}</Typography>
                   </Box>
                   <Button
@@ -1575,7 +1628,7 @@ const VideoPlayer: FC = () => {
                   </Button>
                 </Box>
               );
-            })}
+            }).filter(Boolean)}
             <Box sx={{ mt: 2, textAlign: 'center' }}>
               <Button
                 variant="outlined"
