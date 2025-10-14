@@ -216,7 +216,7 @@ Please let me know how to proceed with payment.`;
       setIsStripeLoading(true);
       await StripeService.initStripe(stripePublishableKey);
       const productName = 'Video Access';
-      const successUrl = `${window.location.origin}/video/${video.$id}?payment_success=true&session_id={CHECKOUT_SESSION_ID}`;
+      const successUrl = `${window.location.origin}/payment-success?video_id=${video.$id}&session_id={CHECKOUT_SESSION_ID}&payment_method=stripe`;
       const cancelUrl = `${window.location.origin}/video/${video.$id}?payment_canceled=true`;
       const sessionId = await StripeService.createCheckoutSession(
         video.price,
