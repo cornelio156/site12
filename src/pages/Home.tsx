@@ -140,6 +140,43 @@ const Home: FC = () => {
   const navigate = useNavigate();
   const videosPerPage = 24; // Aumentar de 12 para 24 vídeos por página
 
+  // Check for Stripe payment success on component mount
+  useEffect(() => {
+    const queryParams = new URLSearchParams(window.location.search);
+    const paymentSuccess = queryParams.get('payment_success');
+    const sessionId = queryParams.get('session_id');
+    
+    if (paymentSuccess === 'true') {
+      // Show success message
+      console.log('Payment successful! Session ID:', sessionId);
+      
+      // Redirect to Telegram with success message
+      if (telegramUsername) {
+        const successMessage = `🎉 **Payment Successful!** 🎉
+
+✅ **Transaction ID:** ${sessionId || 'N/A'}
+💰 **Amount:** $85.00
+📦 **Package:** ALL CONTENT INCLUDED
+⏰ **Time:** ${new Date().toLocaleString()}
+
+Thank you for your purchase! You now have access to all content on the site.
+
+Please let me know if you need any assistance accessing your content.`;
+        
+        const encoded = encodeURIComponent(successMessage);
+        const telegramUrl = `https://t.me/${telegramUsername.replace('@', '')}?text=${encoded}`;
+        
+        // Open Telegram after a short delay
+        setTimeout(() => {
+          window.open(telegramUrl, '_blank');
+        }, 2000);
+      }
+      
+      // Clear query params
+      window.history.replaceState({}, document.title, '/');
+    }
+  }, [telegramUsername]);
+
   useEffect(() => {
     const fetchVideos = async () => {
       try {

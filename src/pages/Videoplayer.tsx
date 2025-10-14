@@ -204,12 +204,10 @@ const VideoPlayer: FC = () => {
     }
   }, [video?.product_link]);
 
-  const handleTelegramRedirect = () => {
+  // Create Telegram href for the button
+  const telegramHref = (() => {
     if (!video) {
-      if (telegramUsername) {
-        window.open(`https://t.me/${telegramUsername.replace('@', '')}`, '_blank');
-      }
-      return;
+      return telegramUsername ? `https://t.me/${telegramUsername.replace('@', '')}` : 'https://t.me/share/url';
     }
     
     // Format date for "Added" field
@@ -224,25 +222,25 @@ const VideoPlayer: FC = () => {
       return `${Math.ceil(diffDays / 30)} months ago`;
     };
     
-    const msg = `🎬 *${video.title}*
+    const msg = `🎬 **${video.title}**
 
-💰 *Price:* $${video.price.toFixed(2)}
-⏱️ *Duration:* ${formatDuration(video.duration)}
-👀 *Views:* ${formatViews(video.views)}
-📅 *Added:* ${formatAddedDate(new Date(video.createdAt || Date.now()))}
+💰 **Price:** $${video.price.toFixed(2)}
+⏱️ **Duration:** ${formatDuration(video.duration)}
+👀 **Views:** ${formatViews(video.views)}
+📅 **Added:** ${formatAddedDate(new Date(video.createdAt || Date.now()))}
 
-📝 *Description:*
+📝 **Description:**
 ${video.description || 'No description available'}
 
 Please let me know how to proceed with payment.`;
     
     const encoded = encodeURIComponent(msg);
     if (telegramUsername) {
-      window.open(`https://t.me/${telegramUsername.replace('@', '')}?start=0&text=${encoded}`, '_blank');
+      return `https://t.me/${telegramUsername.replace('@', '')}?text=${encoded}`;
     } else {
-      window.open(`https://t.me/share/url?text=${encoded}`, '_blank');
+      return `https://t.me/share/url?text=${encoded}`;
     }
-  };
+  })();
 
   const handleBack = () => {
     navigate(-1);
@@ -1268,7 +1266,9 @@ Please let me know how to proceed with payment.`;
                       variant="outlined"
                       fullWidth
                       startIcon={<TelegramIcon />}
-                      onClick={handleTelegramRedirect}
+                      href={telegramHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       sx={{ 
                         py: 1.5,
                         height: '100%',
@@ -1493,7 +1493,9 @@ Please let me know how to proceed with payment.`;
                   variant="outlined"
                   fullWidth
                   startIcon={<TelegramIcon />}
-                  onClick={handleTelegramRedirect}
+                  href={telegramHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   sx={{ 
                     borderColor: '#229ED9',
                     color: '#229ED9',
@@ -1634,7 +1636,9 @@ Please let me know how to proceed with payment.`;
                 variant="outlined"
                 color="primary"
                 startIcon={<TelegramIcon />}
-                onClick={handleTelegramRedirect}
+                href={telegramHref}
+                target="_blank"
+                rel="noopener noreferrer"
               >
                 Contact on Telegram
               </Button>

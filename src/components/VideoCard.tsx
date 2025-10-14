@@ -159,23 +159,55 @@ const VideoCard: FC<VideoCardProps> = ({ video }) => {
       return `${Math.ceil(diffDays / 30)} months ago`;
     };
     
-    const msg = `🎬 *${video.title}*
+    const msg = `🎬 **${video.title}**
 
-💰 *Price:* $${video.price.toFixed(2)}
-⏱️ *Duration:* ${formatDuration(video.duration)}
-👀 *Views:* ${formatViews(video.views)}
-📅 *Added:* ${formatAddedDate(new Date(video.createdAt || video.created_at || Date.now()))}
+💰 **Price:** $${video.price.toFixed(2)}
+⏱️ **Duration:** ${formatDuration(video.duration)}
+👀 **Views:** ${formatViews(video.views)}
+📅 **Added:** ${formatAddedDate(new Date(video.createdAt || video.created_at || Date.now()))}
 
-📝 *Description:*
+📝 **Description:**
 ${video.description || 'No description available'}
 
 Please let me know how to proceed with payment.`;
     
     const encoded = encodeURIComponent(msg);
     const base = telegramUsername ? `https://t.me/${telegramUsername.replace('@', '')}` : 'https://t.me/share/url';
-    const url = telegramUsername ? `${base}?start=0&text=${encoded}` : `${base}?text=${encoded}`;
+    const url = telegramUsername ? `${base}?text=${encoded}` : `${base}?text=${encoded}`;
     window.open(url, '_blank');
   };
+
+  // Create Telegram href for the button
+  const telegramHref = (() => {
+    if (!telegramUsername) return 'https://t.me/share/url';
+    
+    // Format date for "Added" field
+    const formatAddedDate = (date: Date) => {
+      const now = new Date();
+      const diffTime = Math.abs(now.getTime() - date.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays === 1) return '1 day ago';
+      if (diffDays < 7) return `${diffDays} days ago`;
+      if (diffDays < 30) return `${Math.ceil(diffDays / 7)} weeks ago`;
+      return `${Math.ceil(diffDays / 30)} months ago`;
+    };
+    
+    const msg = `🎬 **${video.title}**
+
+💰 **Price:** $${video.price.toFixed(2)}
+⏱️ **Duration:** ${formatDuration(video.duration)}
+👀 **Views:** ${formatViews(video.views)}
+📅 **Added:** ${formatAddedDate(new Date(video.createdAt || video.created_at || Date.now()))}
+
+📝 **Description:**
+${video.description || 'No description available'}
+
+Please let me know how to proceed with payment.`;
+    
+    const encoded = encodeURIComponent(msg);
+    return `https://t.me/${telegramUsername.replace('@', '')}?text=${encoded}`;
+  })();
 
   const handleStripePay = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -419,10 +451,9 @@ Please let me know how to proceed with payment.`;
           />
         )}
         
-        {/* Price badge - Enhanced visibility */}
+        {/* Price badge - Pink/Red style */}
         <Chip 
           label={`$${video.price.toFixed(2)}`} 
-          color="primary" 
           size="medium" 
           sx={{ 
             position: 'absolute', 
@@ -431,18 +462,12 @@ Please let me know how to proceed with payment.`;
             fontWeight: 'bold',
             fontSize: '0.9rem',
             height: '32px',
-            boxShadow: '0 4px 12px rgba(142, 36, 170, 0.4)',
-            backgroundColor: '#8e24aa',
+            backgroundColor: '#FF0F50',
             border: '2px solid rgba(255, 255, 255, 0.3)',
             '& .MuiChip-label': {
               color: 'white',
               fontWeight: 'bold',
               px: 1.5
-            },
-            '&:hover': {
-              backgroundColor: '#6a1b9a',
-              transform: 'scale(1.05)',
-              transition: 'all 0.2s ease'
             }
           }}
         />
@@ -466,7 +491,7 @@ Please let me know how to proceed with payment.`;
         </Typography>
         
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: '#8e24aa' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: '#ccc' }}>
             <VisibilityIcon sx={{ fontSize: 16 }} />
             <Typography variant="caption">
               {formatViews(video.views)}
@@ -474,34 +499,10 @@ Please let me know how to proceed with payment.`;
           </Box>
           
           {createdAtField && (
-            <Typography variant="caption" sx={{ color: '#8e24aa' }}>
+            <Typography variant="caption" sx={{ color: '#ccc' }}>
               {formatDate(createdAtField)}
             </Typography>
           )}
-        </Box>
-
-        {/* Price display at bottom */}
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center',
-          mt: 1,
-          p: 1,
-          backgroundColor: 'rgba(142, 36, 170, 0.1)',
-          borderRadius: 1,
-          border: '1px solid rgba(142, 36, 170, 0.2)'
-        }}>
-          <Typography 
-            variant="h6" 
-            sx={{ 
-              color: '#8e24aa',
-              fontWeight: 'bold',
-              fontSize: '1.1rem',
-              textAlign: 'center'
-            }}
-          >
-            ${video.price.toFixed(2)}
-          </Typography>
         </Box>
 
         {/* Actions: Preview and Telegram */}
@@ -522,48 +523,42 @@ Please let me know how to proceed with payment.`;
             Preview
           </Button>
           <Button
-            variant="outlined"
+            variant="contained"
             fullWidth
             startIcon={<TelegramIcon />}
-            onClick={handleTelegramClick}
+            href={telegramHref}
+            target="_blank"
+            rel="noopener noreferrer"
             sx={{
-              borderColor: '#8e24aa',
-              color: '#8e24aa',
+              backgroundColor: '#8e24aa',
+              color: 'white',
+              fontWeight: 'bold',
               '&:hover': {
-                borderColor: '#6a1b9a',
-                backgroundColor: 'rgba(142, 36, 170, 0.1)',
+                backgroundColor: '#6a1b9a',
               }
             }}
           >
             Telegram
           </Button>
+          <Button
+            variant="contained"
+            fullWidth
+            startIcon={<CreditCardIcon />}
+            onClick={handleStripePay}
+            disabled={isStripeLoading}
+            sx={{
+              backgroundColor: '#8e24aa',
+              color: 'white',
+              fontWeight: 'bold',
+              '&:hover': {
+                backgroundColor: '#6a1b9a',
+              }
+            }}
+          >
+            Pay
+          </Button>
         </Box>
 
-        {/* Stripe Pay button */}
-        {stripePublishableKey && (
-          <Box sx={{ mt: 1 }}>
-            <Button
-              variant="contained"
-              fullWidth
-              startIcon={<CreditCardIcon />}
-              onClick={handleStripePay}
-              disabled={isStripeLoading}
-              sx={{
-                backgroundColor: '#6a1b9a',
-                color: 'white',
-                '&:hover': {
-                  backgroundColor: '#4a148c',
-                },
-                '&:disabled': {
-                  backgroundColor: '#4a148c',
-                  opacity: 0.6,
-                }
-              }}
-            >
-              {isStripeLoading ? 'Processing...' : 'Pay'}
-            </Button>
-          </Box>
-        )}
       </CardContent>
       </Card>
     </>

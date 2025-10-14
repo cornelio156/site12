@@ -447,33 +447,32 @@ const VideoList: FC = () => {
         </Alert>
       )}
       
-      <Fade in={!loading} timeout={500}>
-        <Box>
-          {loading ? (
-            <Grid container spacing={3}>
-              {renderSkeletons()}
-            </Grid>
-          ) : videos.length === 0 ? (
-            <Grow in={true} timeout={1000}>
-              <Paper sx={{ 
-                p: 4, 
-                my: 3, 
-                textAlign: 'center',
-                borderRadius: 2,
-                background: 'linear-gradient(135deg, rgba(255, 15, 80, 0.05) 0%, rgba(209, 13, 66, 0.05) 100%)'
-              }}>
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                  No videos found
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {searchQuery 
-                    ? `No videos matching "${searchQuery}". Try a different search term.` 
-                    : (showFilters 
-                      ? 'No videos match your current filters. Try adjusting your filter settings.' 
-                      : 'No videos available at the moment. Please check back later.')}
-                </Typography>
-              </Paper>
-            </Grow>
+      <Box>
+        {loading ? (
+          <Grid container spacing={3}>
+            {renderSkeletons()}
+          </Grid>
+        ) : videos.length === 0 ? (
+          <Grow in={true} timeout={1000}>
+            <Paper sx={{ 
+              p: 4, 
+              my: 3, 
+              textAlign: 'center',
+              borderRadius: 2,
+              background: 'linear-gradient(135deg, rgba(255, 15, 80, 0.05) 0%, rgba(209, 13, 66, 0.05) 100%)'
+            }}>
+              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                No videos found
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {searchQuery 
+                  ? `No videos matching "${searchQuery}". Try a different search term.` 
+                  : (showFilters 
+                    ? 'No videos match your current filters. Try adjusting your filter settings.' 
+                    : 'No videos available at the moment. Please check back later.')}
+              </Typography>
+            </Paper>
+          </Grow>
           ) : (
             <>
               <Grid container spacing={3}>
@@ -491,8 +490,7 @@ const VideoList: FC = () => {
               </Grid>
             </>
           )}
-        </Box>
-      </Fade>
+      </Box>
     </Container>
     
     <ContactSection />
